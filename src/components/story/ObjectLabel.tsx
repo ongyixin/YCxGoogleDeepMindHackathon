@@ -3,6 +3,8 @@
 import { motion } from "framer-motion";
 
 import type { ObjectCharacter } from "@/types";
+import type { VoiceState } from "@/hooks/useVoiceAgent";
+import { AnimatedCharacterSprite } from "./AnimatedCharacterSprite";
 
 interface ObjectLabelProps {
   character: ObjectCharacter;
@@ -15,6 +17,7 @@ interface ObjectLabelProps {
   onTap?: (character: ObjectCharacter) => void;
   isActive?: boolean;
   delay?: number;
+  voiceState?: VoiceState;
 }
 
 function positionToCSS(
@@ -38,43 +41,6 @@ function positionToCSS(
   }
 }
 
-const EMOTION_EMOJI: Record<string, string> = {
-  longing: "💫",
-  jealous: "😤",
-  suspicious: "🤨",
-  tempting: "😈",
-  smug: "😏",
-  resigned: "😑",
-  desperate: "😰",
-  performing: "🎭",
-  protective: "🛡️",
-  wistful: "🌙",
-  dramatic: "🌹",
-  volatile: "⚡",
-  anxious: "😬",
-  knowing: "👁️",
-  intimate: "🖤",
-  inviting: "✨",
-  parched: "🥺",
-  trampled: "😔",
-  burdened: "⚓",
-  guarded: "🔒",
-  disappointed: "😞",
-  pensive: "🤔",
-  expressive: "🎵",
-  cautious: "👀",
-  flustered: "😳",
-  calculating: "🧮",
-};
-
-function getEmoji(emotionalState: string): string {
-  const lower = emotionalState.toLowerCase();
-  for (const [key, emoji] of Object.entries(EMOTION_EMOJI)) {
-    if (lower.includes(key)) return emoji;
-  }
-  return "✦";
-}
-
 
 export function ObjectLabel({
   character,
@@ -87,6 +53,7 @@ export function ObjectLabel({
   onTap,
   isActive,
   delay,
+  voiceState,
 }: ObjectLabelProps) {
   const posStyle: React.CSSProperties =
     x !== undefined && y !== undefined
@@ -95,7 +62,9 @@ export function ObjectLabel({
   const handleClick = onTap ? () => onTap(character) : onClick ?? (() => {});
   const effectiveSelected = isActive ?? isSelected;
   const effectiveDelay = delay ?? index * 0.12;
-  const emoji = getEmoji(character.emotionalState);
+
+  // Only animate voice for the selected character
+  const activeVoiceState = effectiveSelected ? voiceState : undefined;
 
   return (
     <motion.button
@@ -121,20 +90,15 @@ export function ObjectLabel({
           overflow: "hidden",
           flexShrink: 0,
           background: "rgba(6,4,14,0.75)",
-          imageRendering: "pixelated",
         }}
       >
-        {character.portraitUrl ? (
-          <img
-            src={character.portraitUrl}
-            alt={character.name}
-            style={{ width: "100%", height: "100%", objectFit: "cover", imageRendering: "pixelated" }}
-          />
-        ) : (
-          <div className="w-full h-full flex items-center justify-center">
-            <span style={{ fontSize: 32, lineHeight: 1 }}>{emoji}</span>
-          </div>
-        )}
+        <AnimatedCharacterSprite
+          character={character}
+          voiceState={activeVoiceState}
+          size="full"
+          rounded={false}
+          pixelated
+        />
       </div>
 
       {/* Name label */}

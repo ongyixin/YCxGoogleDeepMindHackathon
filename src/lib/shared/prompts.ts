@@ -235,22 +235,71 @@ export function dialoguePrompt(
       ? "guarded and suspicious"
       : "hostile — this relationship is damaged";
 
-  // Human-readable descriptions of what each gesture conveys so the character
-  // can respond naturally rather than reciting a raw label.
-  const GESTURE_DESCRIPTIONS: Record<string, string> = {
-    thumbs_up:   "a thumbs-up (approval, enthusiasm, 'yes!')",
-    thumbs_down: "a thumbs-down (disapproval, rejection, 'no')",
-    victory:     "a peace / victory sign (playful, confident)",
-    open_palm:   "an open palm (hello, stop, openness)",
-    closed_fist: "a raised fist (challenge, power, defiance)",
-    pointing:    "pointing with one finger (directing attention at something)",
-    i_love_you:  "the 'I love you' sign — pinky, index, and thumb extended (affection)",
+  // Per-gesture directive: description + required response weight + delta floor
+  interface GestureDirective {
+    description: string;
+    responseInstruction: string;
+    deltaFloor: number; // minimum relationshipDelta this gesture requires (signed)
+  }
+
+  const GESTURE_DIRECTIVES: Record<string, GestureDirective> = {
+    thumbs_up: {
+      description: "a thumbs-up — direct approval, enthusiasm, 'yes!'",
+      responseInstruction:
+        "The user is signalling clear approval. Your response MUST warmly acknowledge it. RelationshipDelta must be at least +8.",
+      deltaFloor: 8,
+    },
+    thumbs_down: {
+      description: "a thumbs-down — direct disapproval or rejection",
+      responseInstruction:
+        "The user is signalling clear displeasure. React with hurt, pride, or retaliation per your personality. RelationshipDelta must be at most -6.",
+      deltaFloor: -6,
+    },
+    victory: {
+      description: "a peace / victory sign — playful, celebratory, confident",
+      responseInstruction:
+        "The user is feeling victorious or playful. Match the energy or be charmed. RelationshipDelta should be at least +5.",
+      deltaFloor: 5,
+    },
+    open_palm: {
+      description: "an open palm — openness, a greeting, or 'stop'",
+      responseInstruction:
+        "The user is being open and non-threatening. React with warmth or mild curiosity. RelationshipDelta should be at least +3.",
+      deltaFloor: 3,
+    },
+    closed_fist: {
+      description: "a raised fist — challenge, defiance, or a show of power",
+      responseInstruction:
+        "The user is challenging or posturing at you. React with tension, defensiveness, or intrigue based on your personality. RelationshipDelta should lean negative (-3 to -8) unless you respect shows of strength.",
+      deltaFloor: -4,
+    },
+    pointing: {
+      description: "pointing — directing attention, accusatory, or commanding",
+      responseInstruction:
+        "The user is pointing at you or something near you. React as if they are singling you out — this could be accusatory or exciting depending on context. RelationshipDelta is neutral unless context demands otherwise.",
+      deltaFloor: 0,
+    },
+    i_love_you: {
+      description: "the 'I love you' hand sign — deep affection, intensity",
+      responseInstruction:
+        "The user is making a bold affectionate gesture. React with surprise, reciprocation, or flustered deflection. RelationshipDelta should be at least +8 unless your personality actively rejects affection.",
+      deltaFloor: 8,
+    },
   };
 
-  const gestureSection =
-    gestureContext && gestureContext.gesture !== "none"
-      ? `\nPhysical gesture: The user is showing ${GESTURE_DESCRIPTIONS[gestureContext.gesture] ?? `a "${gestureContext.gesture}" gesture`} (confidence ${Math.round(gestureContext.confidence * 100)}%). You can physically SEE this gesture. Acknowledge or react to it naturally — it is part of this interaction.`
-      : "";
+  const directive = gestureContext && gestureContext.gesture !== "none"
+    ? GESTURE_DIRECTIVES[gestureContext.gesture] ?? null
+    : null;
+
+  const gestureSection = directive
+    ? `\n⚠ LIVE GESTURE DETECTED (${Math.round(gestureContext!.confidence * 100)}% confidence): The user is physically showing ${directive.description}. This is real — you can SEE it happening right now.\nRequired: ${directive.responseInstruction}\nYour response must visibly react to this gesture — do NOT ignore it.`
+    : "";
+
+  const deltaNote = directive
+    ? directive.deltaFloor >= 0
+      ? `  "relationshipDelta": number ≥ ${directive.deltaFloor} (gesture demands positive shift),`
+      : `  "relationshipDelta": number ≤ ${directive.deltaFloor} (gesture demands negative shift),`
+    : `  "relationshipDelta": number,       // -30 to +30`;
 
   return `You are ${characterName}, a ${personality} in a ${genre.replace("_", " ")} game. 
 Voice style: ${voiceStyle}
@@ -264,15 +313,14 @@ ${modeInstructions[interactionMode]}
 
 User says: "${userMessage}"
 
-Respond in character. Keep it under 4 sentences. Be specific, weird, and memorable.
-End with a number from -30 to +30 indicating how much this interaction changed your feelings toward the user.
+Respond in character. Keep it under 4 sentences. Be specific, weird, and memorable.${directive ? " The live gesture is the dominant signal — weave your reaction to it into the response." : ""}
 
 Return JSON:
 {
   "response": string,
   "emotionalStateUpdate": string,   // your new emotional state after this exchange
-  "relationshipDelta": number,       // -30 to +30
-  "hintAtMemory": string | null,     // something to remember from this exchange, or null
+  ${deltaNote}
+  "hintAtMemory": string | null,     // something to remember — include the gesture if one was shown
   "triggerQuest": boolean,           // true if this interaction naturally leads to a quest
   "triggerEscalation": boolean       // true if relationship threshold crossed or drama peaked
 }`;

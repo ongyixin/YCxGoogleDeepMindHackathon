@@ -8,8 +8,12 @@ import { InteractionModal } from "@/components/story/InteractionModal";
 import { MusicIndicator } from "@/components/shared/MusicIndicator";
 import NarrationBanner from "@/components/shared/NarrationBanner";
 import { Camera, type CameraHandle } from "@/components/shared/Camera";
+import { GestureOverlay } from "@/components/shared/GestureOverlay";
+import { useFrontCamera } from "@/hooks/useFrontCamera";
+import { useGestureDetection } from "@/hooks/useGestureDetection";
 import { MOCK_STORY_SESSION } from "@/lib/mock-data";
 import { DEMO_MODE } from "@/lib/constants";
+import { DEMO_CHARACTER, DEMO_SCENE_OBJECT } from "@/lib/demo/demo-data";
 import { saveCharacter } from "@/lib/shared/characterCollection";
 import type {
   ObjectCharacter,
@@ -23,7 +27,21 @@ import type {
   TalkRequest,
   TalkResponse,
   MusicResponse,
+  CharacterExpression,
 } from "@/types";
+import type { VoiceState } from "@/hooks/useVoiceAgent";
+
+// ─── Gesture → UI hint mapping ────────────────────────────────────────────────
+
+const GESTURE_HINT_MAP: Record<string, { icon: string; suggestedMode?: InteractionMode }> = {
+  thumbs_up:   { icon: "👍", suggestedMode: "befriend"    },
+  thumbs_down: { icon: "👎", suggestedMode: "roast"       },
+  victory:     { icon: "✌️", suggestedMode: "befriend"    },
+  open_palm:   { icon: "🖐️", suggestedMode: "befriend"    },
+  closed_fist: { icon: "✊", suggestedMode: "roast"       },
+  pointing:    { icon: "☝️", suggestedMode: "interrogate" },
+  i_love_you:  { icon: "🤟", suggestedMode: "flirt"       },
+};
 
 /**
  * Story Mode page shell — pixel-retro AR RPG overlay.
@@ -51,7 +69,16 @@ function StoryContent() {
   const [scanLoading, setScanLoading] = useState(false);
   const [musicState, setMusicState] = useState<MusicResponse | null>(null);
   const [audioEnabled, setAudioEnabled] = useState(false);
+  /** Voice state of the currently active character interaction (for ObjectLabel animation) */
+  const [speakingVoiceState, setSpeakingVoiceState] = useState<VoiceState>("idle");
   const cameraRef = useRef<CameraHandle>(null);
+
+  // ── Front camera + gesture detection ────────────────────────────────────────
+  const frontCamera = useFrontCamera();
+  const { gesture, isReady: gestureReady, modelError: gestureError } = useGestureDetection(
+    frontCamera.videoRef,
+    true
+  );
 
   // ── Session initialization ──────────────────────────────────────────────────
   useEffect(() => {
@@ -154,7 +181,42 @@ function StoryContent() {
   const handleScan = useCallback(async () => {
     if (DEMO_MODE) {
       setScanLoading(true);
-      setTimeout(() => setScanLoading(false), 2000);
+      await new Promise((r) => setTimeout(r, 2500));
+      // Inject the demo character into the scene — only once
+      setSession((prev) => {
+        if (!prev) return prev;
+        const alreadyPresent = prev.storyState?.characters.some(
+          (c) => c.id === DEMO_CHARACTER.id
+        );
+        if (alreadyPresent) return prev;
+        return {
+          ...prev,
+          sceneGraph: {
+            ...prev.sceneGraph,
+            objects: [
+              ...prev.sceneGraph.objects.filter((o) => o.id !== DEMO_CHARACTER.id),
+              DEMO_SCENE_OBJECT,
+            ],
+          },
+          storyState: prev.storyState
+            ? {
+                ...prev.storyState,
+                characters: [...prev.storyState.characters, DEMO_CHARACTER],
+              }
+            : prev.storyState,
+          narrativeLog: [
+            ...prev.narrativeLog,
+            {
+              id: "demo-n-scan",
+              text: "A presence materializes. Candi has entered the scene — and she looks like trouble.",
+              tone: "dramatic" as const,
+              timestamp: Date.now(),
+              sourceMode: "story" as const,
+            },
+          ],
+        };
+      });
+      setScanLoading(false);
       return;
     }
     if (!sessionId || scanLoading) return;
@@ -199,6 +261,25 @@ function StoryContent() {
     [genre]
   );
 
+  // ── Portrait update (expression sprites loaded lazily) ───────────────────
+  const handlePortraitsUpdate = useCallback(
+    (characterId: string, portraits: Partial<Record<CharacterExpression, string>>) => {
+      setSession((prev) => {
+        if (!prev?.storyState) return prev;
+        return {
+          ...prev,
+          storyState: {
+            ...prev.storyState,
+            characters: prev.storyState.characters.map((c) =>
+              c.id === characterId ? { ...c, portraits } : c
+            ),
+          },
+        };
+      });
+    },
+    []
+  );
+
   // ── Talk handler ────────────────────────────────────────────────────────────
   const handleTalk = useCallback(
     async (mode: InteractionMode, message: string): Promise<{ response: string; relationshipDelta: number; newRelationshipToUser: number; emotionalStateUpdate?: string } | null> => {
@@ -208,15 +289,30 @@ function StoryContent() {
       }
       if (!sessionId || !selectedCharacter) return null;
       try {
+        // Capture a selfie frame at the moment of talking so Gemini can see the user.
+        const selfieFrame = frontCamera.captureFrame();
+
+        const talkBody: TalkRequest = {
+          sessionId,
+          characterId: selectedCharacter.id,
+          interactionMode: mode,
+          message,
+          ...(gesture
+            ? {
+                gestureContext: {
+                  gesture: gesture.label,
+                  confidence: gesture.confidence,
+                  timestamp: gesture.timestamp,
+                },
+              }
+            : {}),
+          ...(selfieFrame ? { selfieFrame } : {}),
+        };
+
         const res = await fetch("/api/talk", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            sessionId,
-            characterId: selectedCharacter.id,
-            interactionMode: mode,
-            message,
-          } as TalkRequest),
+          body: JSON.stringify(talkBody),
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data: TalkResponse = await res.json();
@@ -251,7 +347,7 @@ function StoryContent() {
         return null;
       }
     },
-    [sessionId, selectedCharacter, fetchMusic]
+    [sessionId, selectedCharacter, fetchMusic, gesture, frontCamera]
   );
 
   // ── Loading state ───────────────────────────────────────────────────────────
@@ -315,17 +411,32 @@ function StoryContent() {
       {/* Layer 2: Floating ObjectLabels */}
       {storyState?.characters.map((character: import("@/types").ObjectCharacter, i: number) => {
         const sceneObject = session.sceneGraph.objects.find((o) => o.id === character.id);
+        const isActiveCharacter = selectedCharacter?.id === character.id;
         return (
           <ObjectLabel
             key={character.id}
             character={character}
             position={sceneObject?.position ?? "center"}
             index={i}
-            isSelected={selectedCharacter?.id === character.id}
+            isSelected={isActiveCharacter}
             onClick={() => setSelectedCharacter(character)}
+            voiceState={isActiveCharacter ? speakingVoiceState : undefined}
           />
         );
       })}
+
+      {/* Hidden front camera elements (needed by useFrontCamera + useGestureDetection) */}
+      <video ref={frontCamera.videoRef} playsInline muted style={{ display: "none" }} />
+      <canvas ref={frontCamera.canvasRef} style={{ display: "none" }} />
+
+      {/* Layer 2.5: Gesture overlay PiP */}
+      <GestureOverlay
+        videoRef={frontCamera.videoRef}
+        canvasRef={frontCamera.canvasRef}
+        gesture={gesture}
+        isReady={gestureReady}
+        modelError={gestureError}
+      />
 
       {/* Layer 3: StoryHUD */}
       <StoryHUD
@@ -381,9 +492,21 @@ function StoryContent() {
       {selectedCharacter && (
         <InteractionModal
           character={selectedCharacter}
-          onClose={() => setSelectedCharacter(null)}
+          onClose={() => { setSelectedCharacter(null); setSpeakingVoiceState("idle"); }}
           onTalk={handleTalk}
           onSave={handleSaveCharacter}
+          sessionId={sessionId ?? undefined}
+          onPortraitsUpdate={handlePortraitsUpdate}
+          onVoiceStateChange={setSpeakingVoiceState}
+          currentGesture={
+            gesture && gesture.label !== "none"
+              ? {
+                  label: gesture.label,
+                  icon: GESTURE_HINT_MAP[gesture.label]?.icon ?? "🤚",
+                  suggestedMode: GESTURE_HINT_MAP[gesture.label]?.suggestedMode,
+                }
+              : null
+          }
         />
       )}
 

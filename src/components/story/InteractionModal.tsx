@@ -2,10 +2,12 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { cn } from "@/lib/cn";
 import { RelationshipBar } from "./RelationshipBar";
+import { AnimatedCharacterSprite } from "./AnimatedCharacterSprite";
 import { useVoiceAgent, type VoiceState } from "@/hooks/useVoiceAgent";
-import type { ObjectCharacter, InteractionMode } from "@/types";
+import { DEMO_MODE } from "@/lib/constants";
+import { getDemoResponse } from "@/lib/demo/demo-data";
+import type { ObjectCharacter, InteractionMode, CharacterExpression } from "@/types";
 
 async function fetchSuggestion(
   mode: InteractionMode,
@@ -33,6 +35,12 @@ interface TalkResult {
   emotionalStateUpdate?: string;
 }
 
+interface GestureHint {
+  label: string;
+  icon: string;
+  suggestedMode?: InteractionMode;
+}
+
 interface InteractionModalProps {
   character: ObjectCharacter | null;
   onClose: () => void;
@@ -44,6 +52,14 @@ interface InteractionModalProps {
   onSave?: (character: ObjectCharacter) => void;
   response?: string;
   relationshipDelta?: number;
+  /** Live gesture detected via front camera — shown as a context hint and optionally auto-selects interaction mode */
+  currentGesture?: GestureHint | null;
+  /** Session ID used to lazily fetch expression sprites on first open */
+  sessionId?: string;
+  /** Called when new expression portraits have been loaded for the character */
+  onPortraitsUpdate?: (characterId: string, portraits: Partial<Record<CharacterExpression, string>>) => void;
+  /** Called when the voice state changes — lets the parent show speaking animation on ObjectLabels */
+  onVoiceStateChange?: (state: import("@/hooks/useVoiceAgent").VoiceState) => void;
 }
 
 const INTERACTION_MODES: Array<{
@@ -60,114 +76,6 @@ const INTERACTION_MODES: Array<{
   { mode: "roast",       label: "ROAST",     emoji: "🔥", color: "#FFDE00",               borderColor: "#CC0000" },
   { mode: "apologize",   label: "SORRY",     emoji: "🙏", color: "#B0C4FF",               borderColor: "#3B4CCA" },
 ];
-
-// ─── Personality → gradient/emoji fallback ───────────────────────────────────
-
-const PORTRAIT_THEMES: { keywords: string[]; gradient: string; emoji: string }[] = [
-  { keywords: ["jealous", "envious", "bitter"],    gradient: "from-violet-900 via-purple-800 to-fuchsia-900",  emoji: "😤" },
-  { keywords: ["romantic", "longing", "love"],      gradient: "from-rose-900 via-pink-800 to-red-900",           emoji: "🌹" },
-  { keywords: ["mysterious", "cryptic", "secret"],  gradient: "from-slate-900 via-zinc-800 to-gray-900",         emoji: "🕯️" },
-  { keywords: ["comedic", "chaotic", "clown"],      gradient: "from-amber-900 via-orange-700 to-yellow-800",     emoji: "🎭" },
-  { keywords: ["sage", "wise", "oracle"],           gradient: "from-blue-900 via-indigo-800 to-blue-950",        emoji: "🔮" },
-  { keywords: ["villain", "dark", "sinister"],      gradient: "from-gray-950 via-red-950 to-black",              emoji: "💀" },
-  { keywords: ["hero", "brave", "warrior"],         gradient: "from-amber-800 via-yellow-700 to-orange-800",     emoji: "⚔️" },
-  { keywords: ["anxious", "nervous", "worried"],    gradient: "from-teal-900 via-cyan-800 to-green-900",         emoji: "😰" },
-  { keywords: ["philosopher", "resigned", "weary"], gradient: "from-stone-900 via-neutral-800 to-slate-900",     emoji: "🧐" },
-  { keywords: ["ambitious", "driven", "ruthless"],  gradient: "from-red-900 via-rose-800 to-orange-900",         emoji: "🔱" },
-];
-const DEFAULT_PORTRAIT_THEME = { gradient: "from-violet-950 via-purple-900 to-indigo-950", emoji: "✦" };
-
-function getPortraitTheme(personality: string) {
-  const lower = personality.toLowerCase();
-  for (const t of PORTRAIT_THEMES) {
-    if (t.keywords.some((k) => lower.includes(k))) return t;
-  }
-  return DEFAULT_PORTRAIT_THEME;
-}
-
-/** Square portrait — compact icon used inside profile panel. */
-function CharacterSprite({
-  character,
-  emotionalState,
-}: {
-  character: ObjectCharacter;
-  emotionalState: string;
-}) {
-  const { gradient, emoji } = getPortraitTheme(character.personality);
-  const initial = character.name.charAt(0).toUpperCase();
-
-  return (
-    <div
-      className="relative shrink-0 overflow-hidden border border-[#FFDE00]/50 bg-white"
-      style={{ width: 60, height: 60, borderRadius: 5 }}
-    >
-      {character.portraitUrl ? (
-        <img
-          src={character.portraitUrl}
-          alt={character.name}
-          className="w-full h-full object-contain"
-        />
-      ) : (
-        <div className={cn("absolute inset-0 flex flex-col items-center justify-center bg-gradient-to-br", gradient)}>
-          <span className="text-3xl drop-shadow-lg z-10 leading-none">{emoji}</span>
-          <span
-            className="absolute bottom-1 right-2 font-display text-white/20 font-black leading-none select-none"
-            style={{ fontSize: 20 }}
-            aria-hidden
-          >
-            {initial}
-          </span>
-          <div className="absolute inset-x-0 bottom-0 h-1/3 bg-gradient-to-t from-black/40 to-transparent" />
-        </div>
-      )}
-      {/* Emotional state pip */}
-      <div
-        className="absolute bottom-1 left-1 w-2 h-2 rounded-full border border-black/30 bg-white/40"
-        title={emotionalState}
-      />
-    </div>
-  );
-}
-
-/** Large character render shown above the interaction panel. */
-function CharacterStageImage({
-  character,
-}: {
-  character: ObjectCharacter;
-}) {
-  const { gradient, emoji } = getPortraitTheme(character.personality);
-
-  return (
-    <div
-      className="relative w-full max-w-[320px] sm:max-w-[360px] md:max-w-[420px]"
-      style={{ aspectRatio: "3 / 4" }}
-    >
-      {character.portraitUrl ? (
-        <>
-          <div
-            className="absolute inset-0 rounded-xl"
-            style={{ background: "radial-gradient(ellipse at 50% 90%, rgba(204,0,0,0.18) 0%, rgba(6,4,14,0) 70%)" }}
-          />
-          <img
-            src={character.portraitUrl}
-            alt={character.name}
-            className="absolute inset-0 w-full h-full object-contain"
-            style={{
-              mixBlendMode: "multiply",
-              filter: "drop-shadow(0 8px 24px rgba(255,222,0,0.18)) drop-shadow(0 2px 8px rgba(0,0,0,0.8))",
-            }}
-          />
-          <div className="absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-[rgba(204,0,0,0.22)] to-transparent pointer-events-none rounded-b-xl" />
-        </>
-      ) : (
-        <div className={cn("absolute inset-0 flex items-center justify-center rounded-xl bg-gradient-to-b", gradient)}>
-          <span className="text-7xl sm:text-8xl drop-shadow-xl leading-none">{emoji}</span>
-          <div className="absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-black/70 to-transparent pointer-events-none rounded-b-xl" />
-        </div>
-      )}
-    </div>
-  );
-}
 
 function TypewriterText({ text, className }: { text: string; className?: string }) {
   const [displayed, setDisplayed] = useState("");
@@ -374,6 +282,10 @@ export function InteractionModal({
   onSave,
   response: externalResponse,
   relationshipDelta: externalDelta,
+  currentGesture,
+  sessionId,
+  onPortraitsUpdate,
+  onVoiceStateChange,
 }: InteractionModalProps) {
   if (!character || !isOpen) return null;
 
@@ -396,16 +308,67 @@ export function InteractionModal({
   const [suggestingMessage, setSuggestingMessage] = useState(false);
   const [localResult, setLocalResult] = useState<TalkResult | null>(resolvedLastResult ?? null);
   const [dropdownOpen, setDropdownOpen] = useState(false);
+  /** Locally merged portraits — starts from character.portraits, updated when expressions API returns */
+  const [localPortraits, setLocalPortraits] = useState<Partial<Record<CharacterExpression, string>>>(
+    character.portraits ?? {}
+  );
   const inputRef = useRef<HTMLInputElement>(null);
   const isFirstRender = useRef(true);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const expressionsFetchedRef = useRef(false);
+
+  // ── Lazy expression sprite loading ──────────────────────────────────────
+  useEffect(() => {
+    if (DEMO_MODE || !sessionId || !character || expressionsFetchedRef.current) return;
+    const existing = character.portraits ?? {};
+    const lazy: CharacterExpression[] = ["happy", "angry", "sad", "surprised"];
+    const hasAll = lazy.every((e) => !!existing[e]);
+    if (hasAll) return;
+
+    expressionsFetchedRef.current = true;
+    fetch("/api/expressions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sessionId, characterId: character.id }),
+    })
+      .then((r) => r.ok ? r.json() : null)
+      .then((data) => {
+        if (data?.portraits) {
+          const merged = { ...existing, ...data.portraits };
+          setLocalPortraits(merged);
+          onPortraitsUpdate?.(character.id, merged);
+        }
+      })
+      .catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionId, character?.id]);
+
+  // Keep localPortraits in sync if character prop changes (e.g. new character selected)
+  useEffect(() => {
+    expressionsFetchedRef.current = false;
+    setLocalPortraits(character.portraits ?? {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [character?.id]);
+
+  /** Character merged with locally loaded expression portraits */
+  const characterWithPortraits: ObjectCharacter = {
+    ...character,
+    portraits: localPortraits,
+  };
 
   // ── Voice agent ──────────────────────────────────────────────────────────
   const voice = useVoiceAgent({
     characterName: character.name,
     personality: character.personality,
     voiceStyle: character.voiceStyle,
+    defaultEnabled: DEMO_MODE,
   });
+
+  // Bubble voice state changes to parent so ObjectLabels can animate
+  useEffect(() => {
+    onVoiceStateChange?.(voice.voiceState);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [voice.voiceState]);
 
   // ── Click-outside handler for dropdown ──────────────────────────────────
   useEffect(() => {
@@ -423,13 +386,13 @@ export function InteractionModal({
     if (!isLoading && lastResult) setLocalResult(lastResult);
   }, [lastResult, isLoading]);
 
-  // Auto-suggestion on mode change
+  // Auto-suggestion on mode change (skipped in demo mode — responses are hardcoded)
   useEffect(() => {
     if (isFirstRender.current) {
       isFirstRender.current = false;
       return;
     }
-    if (!selectedMode) return;
+    if (!selectedMode || DEMO_MODE) return;
     let cancelled = false;
     setSuggestingMessage(true);
     fetchSuggestion(selectedMode, character.name, character.personality).then((s) => {
@@ -440,6 +403,20 @@ export function InteractionModal({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedMode]);
 
+  // Auto-select interaction mode when a gesture with a mode suggestion arrives
+  // and the user hasn't manually chosen one yet.
+  const prevGestureLabelRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!currentGesture?.suggestedMode) return;
+    if (currentGesture.label === prevGestureLabelRef.current) return;
+    prevGestureLabelRef.current = currentGesture.label;
+    // Only auto-select if the user hasn't chosen something themselves
+    if (!selectedMode) {
+      setSelectedMode(currentGesture.suggestedMode);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentGesture?.label]);
+
   // ── Core send handler ────────────────────────────────────────────────────
 
   const handleSend = useCallback(async (overrideText?: string) => {
@@ -447,6 +424,29 @@ export function InteractionModal({
     if (!trimmed || sending) return;
     setSending(true);
     try {
+      if (DEMO_MODE) {
+        // Short thinking delay for realism
+        await new Promise((r) => setTimeout(r, 700));
+        // selectedMode === null → free-text fallback; explicit mode → mode response
+        const demo = getDemoResponse(selectedMode);
+        const newRel = Math.min(
+          100,
+          Math.max(-100, character.relationshipToUser + demo.relationshipDelta)
+        );
+        const result: TalkResult = {
+          response: demo.response,
+          relationshipDelta: demo.relationshipDelta,
+          newRelationshipToUser: newRel,
+          emotionalStateUpdate: demo.emotionalStateUpdate,
+        };
+        setLocalResult(result);
+        if (voice.isEnabled && demo.voiceScript) {
+          await voice.speakAsCharacter(demo.voiceScript);
+        }
+        if (!overrideText) setMessage("");
+        return;
+      }
+
       const result = await resolvedOnTalk?.(selectedMode ?? "befriend", trimmed) ?? null;
       if (result) {
         setLocalResult(result);
@@ -460,7 +460,7 @@ export function InteractionModal({
       setSending(false);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [message, sending, selectedMode, voice.isEnabled, voice.speakAsCharacter, resolvedOnTalk]);
+  }, [message, sending, selectedMode, character.relationshipToUser, voice.isEnabled, voice.speakAsCharacter, resolvedOnTalk]);
 
   // ── Voice STT → auto-send ────────────────────────────────────────────────
 
@@ -511,7 +511,24 @@ export function InteractionModal({
       >
         {/* Character stage image */}
         <div className="flex-1 min-h-[220px] flex items-end justify-center px-1 pb-1 pointer-events-none">
-          <CharacterStageImage character={character} />
+          <div
+            className="relative w-full max-w-[320px] sm:max-w-[360px] md:max-w-[420px]"
+            style={{ aspectRatio: "3 / 4" }}
+          >
+            <div className="absolute inset-0 rounded-xl" style={{ background: "radial-gradient(ellipse at 50% 90%, rgba(204,0,0,0.18) 0%, rgba(6,4,14,0) 70%)" }} />
+            <AnimatedCharacterSprite
+              character={characterWithPortraits}
+              voiceState={voice.voiceState}
+              size="full"
+              rounded
+              pixelated
+              className="absolute inset-0"
+              style={{
+                filter: "drop-shadow(0 8px 24px rgba(255,222,0,0.18)) drop-shadow(0 2px 8px rgba(0,0,0,0.8))",
+              }}
+            />
+            <div className="absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-[rgba(204,0,0,0.22)] to-transparent pointer-events-none rounded-b-xl" />
+          </div>
         </div>
 
         {/* Window chrome header */}
@@ -615,7 +632,13 @@ export function InteractionModal({
           >
             {/* Character portrait + info */}
             <div className="flex items-start gap-2">
-              <CharacterSprite character={character} emotionalState={displayEmotion} />
+              <AnimatedCharacterSprite
+                character={characterWithPortraits}
+                voiceState={voice.voiceState}
+                size="sm"
+                rounded
+                pixelated
+              />
               <div className="flex-1 min-w-0">
                 <p className="font-pixel text-xs" style={{ color: "#FFF0B0" }}>
                   {character.name}
@@ -839,6 +862,40 @@ export function InteractionModal({
                 )}
               </AnimatePresence>
             </div>
+
+            {/* Live gesture hint */}
+            <AnimatePresence>
+              {currentGesture && (
+                <motion.div
+                  key={currentGesture.label}
+                  initial={{ opacity: 0, y: -4 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -4 }}
+                  transition={{ duration: 0.15 }}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 6,
+                    padding: "3px 8px",
+                    background: "rgba(255,222,0,0.07)",
+                    border: "1px solid rgba(255,222,0,0.25)",
+                  }}
+                >
+                  <span style={{ fontSize: 14, lineHeight: 1 }}>{currentGesture.icon}</span>
+                  <span className="font-pixel" style={{ fontSize: 8, color: "rgba(255,222,0,0.75)", letterSpacing: "0.04em" }}>
+                    GESTURE: {currentGesture.label.replace(/_/g, " ").toUpperCase()}
+                    {currentGesture.suggestedMode && !selectedMode && (
+                      <span style={{ color: "rgba(255,222,0,0.45)" }}>
+                        {" "}→ AUTO: {currentGesture.suggestedMode.toUpperCase()}
+                      </span>
+                    )}
+                  </span>
+                  <span className="font-pixel" style={{ fontSize: 7, color: "rgba(255,222,0,0.35)", marginLeft: "auto" }}>
+                    SEEN BY CHAR
+                  </span>
+                </motion.div>
+              )}
+            </AnimatePresence>
 
             {/* Input area — text or voice bar */}
             <AnimatePresence mode="wait">

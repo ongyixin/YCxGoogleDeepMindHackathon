@@ -6,7 +6,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { v4 as uuidv4 } from "uuid";
 import { getSession, patchSession } from "@/lib/shared/sessions";
 import { safeAnalyzeImageJSON } from "@/lib/shared/gemini";
-import { visualGenerator } from "@/lib/shared/nanobanana";
+import { visualGenerator, generateExpressionVariant } from "@/lib/shared/nanobanana";
 import { sceneAnalysisPrompt, facePartAnalysisPrompt } from "@/lib/shared/prompts";
 import { personification } from "@/lib/story/personification";
 import { relationshipManager } from "@/lib/story/relationships";
@@ -18,6 +18,7 @@ import type {
   DetectedObject,
   NarrationEvent,
   StoryGenre,
+  CharacterExpression,
 } from "@/types";
 
 const MAJOR_OBJECT_MIN_SALIENCE = 0.6;
@@ -135,19 +136,24 @@ function buildCharacterPortraitPromptFromReference(input: {
     soap_opera:       "rich warm pixel palette, theatrical glamour, vivid dramatic coloring",
   };
   const genreStyle = genreStyleHints[input.genre] ?? "vibrant colors, expressive personality";
-  const contextHint = input.context?.trim() ? `Context: ${input.context}.` : "";
 
-  return [
+  const basePrompt = [
     `Analyze the provided image and generate a new version based on the following criteria:`,
-    `Core Style: Transform the primary subject into a clean, modern pixel art style inspired specifically by Date Everything!. This aesthetic must feature vibrant colors, minimal dithering, and distinct, expressive outlines. Style variant: ${genreStyle}.`,
-    `Anthropomorphization (The "Date Everything!" Rule): If the subject is an object, plant, or animal, give it human-like anatomy, posture, and personality. It should have clearly defined, large, expressive eyes, a mouth, and limbs (arms and legs) that allow it to stand and pose like a person. The features must be integrated charmingly into the original object's design.`,
+    `\nCore Style: Transform the primary subject into a clean, modern pixel art style inspired specifically by Date Everything!. This aesthetic must feature vibrant colors, minimal dithering, and distinct, expressive outlines. Style variant: ${genreStyle}.`,
+    `\nAnthropomorphization (The "Date Everything!" Rule): If the subject is an object, plant, or animal, give it human-like anatomy, posture, and personality. It should have clearly defined, large, expressive eyes, a mouth, and limbs (arms and legs) that allow it to stand and pose like a person. The features must be integrated charmingly into the original object's design.`,
+    `\nComposition: FULL BODY from head to toe, standing centered.`,
+    `Background: Solid PURE WHITE background (#ffffff). No other colors or elements should be in the background.`,
+    `View: Show complete legs and feet. Do NOT crop at waist or chest. Single character only.`,
+    `Restrictions: No text, no speech bubbles, no watermark, no overlays, no "aging" details.`,
+  ].join(" ");
+
+  const dynamicPrompt = [
     `Character identity: The character is named ${input.name}, a ${input.personality} personified ${input.objectLabel}. They look ${input.emotionalState}.`,
-    contextHint,
-    "FULL BODY from head to toe, standing centered.",
-    "SOLID PURE WHITE BACKGROUND (#ffffff) — character isolated with absolutely no background scenery, no ground, no floor, no shadows, no environment behind them.",
-    "Show complete legs and feet. Do NOT crop at waist or chest. Single character only.",
-    "No text, no speech bubbles, no watermark.",
+    input.context?.trim() ? `Visual traits to retain: ${input.context}.` : "",
+    `Personality and Expression: The character should have a distinct, appealing personality consistent with their ${input.personality} nature.`,
   ].filter(Boolean).join(" ");
+
+  return `${basePrompt}\n\n${dynamicPrompt}`;
 }
 
 function buildCharacterPortraitPrompt(input: {
@@ -167,35 +173,38 @@ function buildCharacterPortraitPrompt(input: {
     soap_opera:       "rich warm pixel palette, theatrical glamour, vivid dramatic coloring",
   };
   const genreStyle = genreStyleHints[input.genre] ?? "vibrant colors, expressive personality";
-  const contextHint = input.context?.trim()
-    ? `Context clue: ${input.context}.`
-    : "";
 
   const isFacePart = isFacePartLabel(input.objectLabel);
 
   // Face body parts: the feature IS the body — giant ${label} with stubby limbs sprouting out.
   // Regular objects: classic anthropomorphised sprite that retains object's visual identity.
-  const characterDescription = isFacePart
+  const coreDescription = isFacePart
     ? [
         `Chibi pixel art character who IS a giant living ${input.objectLabel} — the ${input.objectLabel} itself is the entire body, with tiny expressive arms and legs sprouting from it.`,
-        `The ${input.objectLabel} dominates the silhouette completely. The character's personality is: ${input.personality}. They look ${input.emotionalState}.`,
+        `The ${input.objectLabel} dominates the silhouette completely.`,
         `Art style: ${genreStyle}, exaggerated chibi proportions, thick pixel outlines, comedic grotesque charm, vibrant colors.`,
-      ]
+      ].join(" ")
     : [
         `Clean modern pixel art character sprite inspired by the game "Date Everything!", depicting ${input.name}, a ${input.personality} personified ${input.objectLabel}.`,
-        `They look ${input.emotionalState}.`,
         `The character is fully anthropomorphized: given a human-like body with two arms, two legs, and an upright standing pose. The design retains the shape and visual identity of the original ${input.objectLabel}, but integrates large expressive eyes, a charming mouth, and limbs organically into the object's form.`,
         `Art style: ${genreStyle}, vibrant colors, minimal dithering, distinct expressive outlines, pixel-perfect 2D sprite.`,
-      ];
+      ].join(" ");
 
-  return [
-    ...characterDescription,
-    contextHint,
-    "FULL BODY from head to toe, standing centered.",
-    "SOLID PURE WHITE BACKGROUND (#ffffff) — character isolated with absolutely no background scenery, no ground, no floor, no shadows, no environment behind them.",
-    "Show complete legs and feet. Do NOT crop at waist or chest. Single character only.",
-    "No text, no speech bubbles, no watermark.",
+  const basePrompt = [
+    coreDescription,
+    `\nComposition: FULL BODY from head to toe, standing centered.`,
+    `Background: Solid PURE WHITE background (#ffffff). No other colors or elements should be in the background.`,
+    `View: Show complete legs and feet. Do NOT crop at waist or chest. Single character only.`,
+    `Restrictions: No text, no speech bubbles, no watermark, no overlays, no "aging" details.`,
+  ].join(" ");
+
+  const dynamicPrompt = [
+    `Character identity: The character is named ${input.name}, a ${input.personality} personified ${input.objectLabel}. They look ${input.emotionalState}.`,
+    input.context?.trim() ? `Visual traits to retain: ${input.context}.` : "",
+    `Personality and Expression: The character should have a distinct, appealing personality consistent with their ${input.personality} nature.`,
   ].filter(Boolean).join(" ");
+
+  return `${basePrompt}\n\n${dynamicPrompt}`;
 }
 
 export async function POST(req: NextRequest) {
@@ -310,9 +319,25 @@ export async function POST(req: NextRequest) {
                   sessionContext: `${storyState.genre} ${character.objectLabel}`,
                   referenceImage: body.frame || undefined,
                 });
+
+                const neutralUrl = portraitResult?.imageUrl || undefined;
+
+                // Build character identity string for expression variants
+                const characterIdentity = `${character.name}, a ${character.personality} personified ${character.objectLabel}`;
+
+                // Generate talking variant in parallel using the neutral sprite as reference
+                const talkingUrl = neutralUrl
+                  ? await generateExpressionVariant("talking", neutralUrl, characterIdentity).catch(() => null) ?? undefined
+                  : undefined;
+
+                const portraits: Partial<Record<CharacterExpression, string>> = {};
+                if (neutralUrl) portraits.neutral = neutralUrl;
+                if (talkingUrl) portraits.talking = talkingUrl;
+
                 return {
                   ...character,
-                  portraitUrl: portraitResult?.imageUrl || undefined,
+                  portraitUrl: neutralUrl,
+                  portraits,
                 };
               })
             )

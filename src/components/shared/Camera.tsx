@@ -90,7 +90,9 @@ const Camera = forwardRef<CameraHandle, CameraProps>(function Camera(
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
           video: {
-            facingMode: "environment",
+            // "environment" is ideal for mobile rear camera but ignored gracefully
+            // on desktop where only one camera exists.
+            facingMode: { ideal: "environment" },
             width: { ideal: 1280 },
             height: { ideal: 720 },
           },

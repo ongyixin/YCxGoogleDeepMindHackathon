@@ -4,7 +4,7 @@
  */
 
 import { v4 as uuid } from "uuid";
-import { safeGenerateJSON, safeGenerateJSONFast } from "@/lib/shared/gemini";
+import { safeGenerateJSON, safeGenerateJSONFast, safeAnalyzeImageJSON } from "@/lib/shared/gemini";
 import {
   dialoguePrompt,
   questGenerationPrompt,
@@ -32,7 +32,44 @@ import type {
   DetectedObject,
   StoryGenre,
   StoryPhase,
+  GestureContext,
 } from "@/types";
+
+// ─── Gesture helpers ──────────────────────────────────────────────────────────
+
+/**
+ * Server-side deterministic delta nudge applied ON TOP of Gemini's response.
+ * Ensures gestures always have mechanical impact regardless of Gemini's weighting.
+ * Capped so it cannot exceed the prompt's requested floor by more than a few points.
+ */
+const GESTURE_DELTA_NUDGE: Record<string, number> = {
+  thumbs_up:   +6,
+  victory:     +4,
+  open_palm:   +3,
+  i_love_you:  +6,
+  pointing:     0,
+  thumbs_down: -5,
+  closed_fist: -3,
+};
+
+function getGestureNudge(gesture?: string | null): number {
+  if (!gesture || gesture === "none") return 0;
+  return GESTURE_DELTA_NUDGE[gesture] ?? 0;
+}
+
+/**
+ * Suggest an interaction mode based on the detected gesture.
+ * Only used as a fallback when the caller passes the default "befriend" mode
+ * without an explicit user selection (i.e. no mode was actively chosen).
+ */
+const GESTURE_MODE_SUGGESTION: Partial<Record<string, InteractionMode>> = {
+  thumbs_up:   "befriend",
+  victory:     "befriend",
+  open_palm:   "befriend",
+  i_love_you:  "flirt",
+  closed_fist: "roast",
+  pointing:    "interrogate",
+};
 
 // ─── Gemini dialogue response shape ───────────────────────────────────────────
 
@@ -184,7 +221,9 @@ export async function processTalk(
   session: SessionState,
   characterId: string,
   mode: InteractionMode,
-  userMessage: string
+  userMessage: string,
+  gestureContext?: GestureContext | null,
+  selfieFrame?: string | null
 ): Promise<TalkResult> {
   if (!session.storyState) throw new Error("Session has no story state");
 
@@ -211,18 +250,40 @@ export async function processTalk(
     mode,
     userMessage,
     nearbyCharacters,
-    storyState.genre
+    storyState.genre,
+    gestureContext ?? null
   );
 
-  const aiResult = await safeGenerateJSONFast<DialogueResult>(prompt);
+  // When the caller provides a selfie frame, use multimodal Gemini so the
+  // character can literally see the user (their face, gesture, surroundings).
+  // Fall back to fast text-only if no frame or if multimodal fails.
+  let aiResult: DialogueResult | null = null;
+  if (selfieFrame) {
+    aiResult = await safeAnalyzeImageJSON<DialogueResult>(selfieFrame, prompt);
+  }
+  if (!aiResult) {
+    aiResult = await safeGenerateJSONFast<DialogueResult>(prompt);
+  }
+
   const result = aiResult ?? getFallbackResponse(character, mode);
 
-  const prevScore = character.relationshipToUser;
-  const newScore = Math.min(100, Math.max(-100, prevScore + result.relationshipDelta));
+  // Apply a deterministic gesture nudge on top of Gemini's delta so gestures
+  // always produce mechanical effect even if the model under-weights them.
+  const gestureNudge = getGestureNudge(gestureContext?.gesture);
+  const rawDelta = result.relationshipDelta + gestureNudge;
+  const effectiveDelta = Math.max(-30, Math.min(30, rawDelta));
 
-  // Add memory hint if present
+  const prevScore = character.relationshipToUser;
+  const newScore = Math.min(100, Math.max(-100, prevScore + effectiveDelta));
+
+  // Build memory hint — always include the gesture so the character remembers it
+  const gestureLabel = gestureContext?.gesture && gestureContext.gesture !== "none"
+    ? gestureContext.gesture.replace(/_/g, " ")
+    : null;
   const memoryHint = result.hintAtMemory
     ? result.hintAtMemory
+    : gestureLabel
+    ? `${mode} interaction — user showed "${gestureLabel}" gesture — said: "${userMessage.slice(0, 30)}"`
     : `The ${mode} attempt — user said: "${userMessage.slice(0, 40)}"`;
 
   // Update conversation log entry
@@ -231,15 +292,15 @@ export async function processTalk(
     mode,
     userMessage,
     characterResponse: result.response,
-    relationshipDelta: result.relationshipDelta,
+    relationshipDelta: effectiveDelta,
     timestamp: Date.now(),
   };
 
-  // Apply relationship update with cascade
+  // Apply relationship update with cascade (using effectiveDelta which includes gesture nudge)
   let updatedStoryState = applyRelationshipDelta(
     storyState,
     characterId,
-    result.relationshipDelta,
+    effectiveDelta,
     memoryHint
   );
 
@@ -342,7 +403,7 @@ export async function processTalk(
   let xpAwarded = 10; // base interaction XP
   if (newQuest) xpAwarded += 15;
   if (escalationEvent) xpAwarded += 25;
-  if (Math.abs(result.relationshipDelta) >= 15) xpAwarded += 10; // big shift bonus
+  if (Math.abs(effectiveDelta) >= 15) xpAwarded += 10; // big shift bonus
 
   const updatedSession: SessionState = {
     ...session,
@@ -355,7 +416,7 @@ export async function processTalk(
   return {
     response: result.response,
     emotionalStateUpdate: result.emotionalStateUpdate,
-    relationshipDelta: result.relationshipDelta,
+    relationshipDelta: effectiveDelta,
     newRelationshipToUser: newScore,
     quest: newQuest,
     escalation: escalationEvent,

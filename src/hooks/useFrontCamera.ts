@@ -32,7 +32,9 @@ export function useFrontCamera(): UseFrontCameraReturn {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
           video: {
-            facingMode: "user",
+            // "user" is ideal for mobile front camera; on desktop this is simply
+            // the webcam, so treat it as ideal rather than required.
+            facingMode: { ideal: "user" },
             width: { ideal: 640 },
             height: { ideal: 480 },
           },

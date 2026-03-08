@@ -8,13 +8,14 @@ import type {
   NanoBananaResponse,
   NanoBananaAssetType,
   IVisualGenerator,
+  CharacterExpression,
 } from "@/types";
 import { env } from "@/lib/env";
 
 const IMAGEN_MODEL = "imagen-3.0-generate-001";
 const IMAGEN_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${IMAGEN_MODEL}:generateImages`;
 
-const GEMINI_FLASH_IMAGE_MODEL = "gemini-2.0-flash-exp-image-generation";
+const GEMINI_FLASH_IMAGE_MODEL = "gemini-3.1-flash-image-preview";
 const GEMINI_FLASH_IMAGE_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_FLASH_IMAGE_MODEL}:generateContent`;
 
 // Fallback emojis per asset type — shown in UI when all generation fails
@@ -117,7 +118,7 @@ async function generateWithGeminiFlash(
 async function removeBackgroundMagicWand(
   dataUrl: string,
   featherRadius = 3,
-  tolerance = 30
+  tolerance = 40
 ): Promise<string> {
   try {
     const base64 = dataUrl.replace(/^data:image\/\w+;base64,/, "");
@@ -190,6 +191,51 @@ async function removeBackgroundMagicWand(
     console.error("[nanobanana] Background removal failed:", err);
     return dataUrl; // Return original on failure
   }
+}
+
+/** Prompt modifiers that describe how each expression differs from the neutral pose. */
+const EXPRESSION_MODIFIERS: Record<CharacterExpression, string> = {
+  neutral: "neutral calm expression, default standing pose",
+  talking: "mouth wide open as if mid-sentence, animated speech expression, otherwise identical pose and design",
+  happy: "beaming smile, eyes sparkling with joy, upbeat energetic pose, otherwise identical design",
+  angry: "furrowed brows, gritted teeth or tight frown, tense body posture, otherwise identical design",
+  sad: "downcast drooping eyes, slight frown, slightly slumped dejected posture, otherwise identical design",
+  surprised: "wide open eyes, open O-shaped mouth, raised eyebrows, slightly recoiled posture, otherwise identical design",
+};
+
+/**
+ * Generate an expression variant of an existing character sprite.
+ * Uses the neutral sprite as a visual reference so Gemini Flash can preserve
+ * the character's design and only alter the facial expression / posture.
+ *
+ * Returns a PNG data URL, or null if generation fails.
+ */
+export async function generateExpressionVariant(
+  expression: CharacterExpression,
+  neutralSpriteUrl: string,
+  characterIdentityPrompt: string
+): Promise<string | null> {
+  const apiKey = env.GEMINI_API_KEY;
+  if (!apiKey || !neutralSpriteUrl) return null;
+
+  const modifier = EXPRESSION_MODIFIERS[expression];
+
+  const prompt = [
+    `Redraw this exact pixel art character sprite with ONE change: ${modifier}.`,
+    `Keep everything else identical: same character design, same pixel art style, same body proportions, same outfit, same color palette, same full-body standing pose, same white background.`,
+    `Character identity: ${characterIdentityPrompt}`,
+    `Output: full body pixel art sprite, SOLID PURE WHITE BACKGROUND (#ffffff), no text, no watermark, no speech bubbles.`,
+  ].join(" ");
+
+  try {
+    const result = await generateWithGeminiFlash(prompt, neutralSpriteUrl);
+    if (result) {
+      return await removeBackgroundMagicWand(result);
+    }
+  } catch (err) {
+    console.error(`[nanobanana] Expression variant '${expression}' generation failed:`, err);
+  }
+  return null;
 }
 
 export const visualGenerator: IVisualGenerator = {

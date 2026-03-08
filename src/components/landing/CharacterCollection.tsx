@@ -1,9 +1,28 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { loadSavedCharacters, removeSavedCharacter } from "@/lib/shared/characterCollection";
-import type { SavedCharacter, StoryGenre } from "@/types";
+import { loadSavedCharacters, removeSavedCharacter, saveCharacter } from "@/lib/shared/characterCollection";
+import { InteractionModal } from "@/components/story/InteractionModal";
+import type { SavedCharacter, StoryGenre, ObjectCharacter, InteractionMode } from "@/types";
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+/** Convert a SavedCharacter (localStorage) into the ObjectCharacter shape the modal expects. */
+function toObjectCharacter(c: SavedCharacter): ObjectCharacter {
+  return {
+    id: c.id,
+    objectLabel: c.objectLabel,
+    name: c.name,
+    personality: c.personality,
+    voiceStyle: c.voiceStyle,
+    emotionalState: c.emotionalState,
+    relationshipToUser: c.relationshipScore,
+    relationshipStance: "recalling past encounter",
+    memories: c.memories,
+    portraitUrl: c.portraitUrl,
+  };
+}
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -207,10 +226,12 @@ function CharacterDetail({
   character,
   onBack,
   onRemove,
+  onTalk,
 }: {
   character: SavedCharacter;
   onBack: () => void;
   onRemove: () => void;
+  onTalk: () => void;
 }) {
   const [confirmRemove, setConfirmRemove] = useState(false);
   const genre = GENRE_META[character.genre] ?? { label: character.genre, emoji: "✦", color: "#FFDE00" };
@@ -369,11 +390,30 @@ function CharacterDetail({
             </div>
           )}
 
-          {/* Footer stats */}
+          {/* TALK button — primary CTA */}
+          <motion.button
+            onClick={onTalk}
+            whileTap={{ scale: 0.97, x: 2, y: 2 }}
+            className="w-full font-pixel tracking-widest"
+            style={{
+              marginTop: 14,
+              fontSize: 13,
+              padding: "11px 0",
+              background: "#C84B7A",
+              color: "#FFDE00",
+              border: "2px solid #8B3060",
+              boxShadow: "3px 3px 0 rgba(200,75,122,0.65)",
+              letterSpacing: "0.2em",
+            }}
+          >
+            ♥ TALK TO {character.name.toUpperCase()}
+          </motion.button>
+
+          {/* Footer stats + remove */}
           <div
             style={{
-              marginTop: 12,
-              paddingTop: 10,
+              marginTop: 10,
+              paddingTop: 8,
               borderTop: "1px solid rgba(255,222,0,0.1)",
               display: "flex",
               justifyContent: "space-between",
@@ -389,7 +429,6 @@ function CharacterDetail({
               </p>
             </div>
 
-            {/* Remove button */}
             <AnimatePresence mode="wait">
               {confirmRemove ? (
                 <motion.div
@@ -494,6 +533,7 @@ function EmptyState() {
 export default function CharacterCollection({ onBack }: { onBack: () => void }) {
   const [characters, setCharacters] = useState<SavedCharacter[]>([]);
   const [selected, setSelected] = useState<SavedCharacter | null>(null);
+  const [talkingCharacter, setTalkingCharacter] = useState<SavedCharacter | null>(null);
   const [filterGenre, setFilterGenre] = useState<StoryGenre | "all">("all");
 
   useEffect(() => {
@@ -505,6 +545,55 @@ export default function CharacterCollection({ onBack }: { onBack: () => void }) 
     setCharacters((prev) => prev.filter((c) => c.id !== characterId));
     setSelected(null);
   }
+
+  /** Called by InteractionModal with the latest character state. */
+  const handleRecallSave = useCallback((updatedChar: ObjectCharacter) => {
+    if (!talkingCharacter) return;
+    const updated = saveCharacter(updatedChar, talkingCharacter.genre);
+    setCharacters((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
+    setTalkingCharacter(updated);
+    setSelected((prev) => (prev?.id === updated.id ? updated : prev));
+  }, [talkingCharacter]);
+
+  /** Called by InteractionModal's onTalk — proxies to /api/recall. */
+  const handleRecallTalk = useCallback(
+    async (mode: InteractionMode, message: string) => {
+      if (!talkingCharacter) return null;
+      try {
+        const res = await fetch("/api/recall", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            character: talkingCharacter,
+            interactionMode: mode,
+            message,
+          }),
+        });
+        if (!res.ok) return null;
+        const data = await res.json();
+        // Persist updated relationship score to the saved character
+        const updatedSaved: SavedCharacter = {
+          ...talkingCharacter,
+          relationshipScore: data.newRelationshipToUser,
+          emotionalState: data.emotionalStateUpdate ?? talkingCharacter.emotionalState,
+          interactionCount: talkingCharacter.interactionCount + 1,
+        };
+        saveCharacter(toObjectCharacter(updatedSaved), talkingCharacter.genre);
+        setTalkingCharacter(updatedSaved);
+        setCharacters((prev) => prev.map((c) => (c.id === updatedSaved.id ? updatedSaved : c)));
+        setSelected((prev) => (prev?.id === updatedSaved.id ? updatedSaved : prev));
+        return {
+          response: data.response,
+          relationshipDelta: data.relationshipDelta,
+          newRelationshipToUser: data.newRelationshipToUser,
+          emotionalStateUpdate: data.emotionalStateUpdate,
+        };
+      } catch {
+        return null;
+      }
+    },
+    [talkingCharacter]
+  );
 
   const filtered = filterGenre === "all"
     ? characters
@@ -529,6 +618,7 @@ export default function CharacterCollection({ onBack }: { onBack: () => void }) 
             character={selected}
             onBack={() => setSelected(null)}
             onRemove={() => handleRemove(selected.id)}
+            onTalk={() => setTalkingCharacter(selected)}
           />
         ) : (
           <motion.div
@@ -644,6 +734,25 @@ export default function CharacterCollection({ onBack }: { onBack: () => void }) 
               </div>
             )}
           </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Interaction modal — fixed full-screen overlay when talking to a collection character */}
+      <AnimatePresence>
+        {talkingCharacter && (
+          <div
+            key={`modal-${talkingCharacter.id}`}
+            className="fixed inset-0"
+            style={{ zIndex: 200 }}
+          >
+            <InteractionModal
+              character={toObjectCharacter(talkingCharacter)}
+              isOpen
+              onClose={() => setTalkingCharacter(null)}
+              onTalk={handleRecallTalk}
+              onSave={handleRecallSave}
+            />
+          </div>
         )}
       </AnimatePresence>
     </motion.div>

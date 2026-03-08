@@ -3,14 +3,16 @@
 /**
  * useVoiceAgent — voice interaction layer for character dialogue.
  *
- * STT:  Web Speech API  (browser-native, no key needed)
- * TTS:  Gemini Live API (gemini-2.0-flash-live-001, character voice)
+ * STT:  Web Speech API (browser-native, no key needed)
+ * TTS:  Gemini Live API — gemini-2.5-flash-native-audio-latest
+ *       Audio streams chunk-by-chunk so playback starts in ~1s, not after
+ *       the full response has been received.
  *
- * State machine:
+ * Voice state machine:
  *   idle → listening  (user presses mic)
- *        → processing (transcript captured, waiting for API response)
- *        → speaking   (Gemini Live audio playing)
- *        → idle       (audio ends or user cancels)
+ *        → processing (transcript received, /api/talk in flight)
+ *        → speaking   (Gemini Live audio streaming)
+ *        → idle       (audio ends / user cancels)
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -34,27 +36,19 @@ export interface UseVoiceAgentReturn {
 
 // ─── Voice selection ──────────────────────────────────────────────────────────
 
-/**
- * Maps a character's personality/voiceStyle to one of Gemini Live's
- * built-in voices. Each has a distinct timbre that suits different archetypes.
- */
+/** Maps personality/voiceStyle to a Gemini Live prebuilt voice name. */
 function pickVoice(personality: string, voiceStyle: string): string {
   const s = `${personality} ${voiceStyle}`.toLowerCase();
-  // Female-coded traits → Aoede (bright, expressive)
   if (/\b(female|woman|goddess|queen|witch|she|her|lady|mother|sister)\b/.test(s)) return "Aoede";
-  // Dark / deep / villain → Charon (low, ominous)
   if (/\b(deep|gruff|dark|villain|demon|sinister|menacing|raspy|gravel|shadow)\b/.test(s)) return "Charon";
-  // Chaotic / comedic → Puck (bright, mischievous)
   if (/\b(chaotic|playful|mischiev|trickster|jester|comedian|clown|comedic|chaos)\b/.test(s)) return "Puck";
-  // Stern / warrior → Fenrir (deep, powerful)
   if (/\b(stern|warrior|soldier|stoic|strong|heroic|brave|guardian|protector)\b/.test(s)) return "Fenrir";
-  // Default → Kore (clear, neutral female)
   return "Kore";
 }
 
-// ─── PCM helpers ──────────────────────────────────────────────────────────────
+// ─── PCM decoder ─────────────────────────────────────────────────────────────
 
-/** Convert base64-encoded 16-bit LE PCM → Float32 samples for AudioContext. */
+/** Convert base64-encoded 16-bit LE PCM → Float32 samples (for AudioContext). */
 function base64PcmToFloat32(b64: string): Float32Array {
   const binary = atob(b64);
   const bytes = new Uint8Array(binary.length);
@@ -71,30 +65,37 @@ export function useVoiceAgent({
   characterName,
   personality,
   voiceStyle,
+  defaultEnabled = false,
 }: {
   characterName: string;
   personality: string;
   voiceStyle: string;
+  /** When true, voice mode starts enabled (e.g. demo mode). */
+  defaultEnabled?: boolean;
 }): UseVoiceAgentReturn {
   const [voiceState, setVoiceState] = useState<VoiceState>("idle");
   const [lastTranscript, setLastTranscript] = useState("");
-  const [isEnabled, setIsEnabled] = useState(false);
+  const [isEnabled, setIsEnabled] = useState(defaultEnabled);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const recognitionRef = useRef<any>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
-  const sourceRef = useRef<AudioBufferSourceNode | null>(null);
+  const scheduledEndTimeRef = useRef<number>(0);
+  const lastSourceRef = useRef<AudioBufferSourceNode | null>(null);
   const voiceStateRef = useRef<VoiceState>("idle");
   voiceStateRef.current = voiceState;
+
+  // Track whether speaking has been cancelled mid-stream
+  const cancelledRef = useRef(false);
+  const liveSessionRef = useRef<{ close: () => void } | null>(null);
 
   const apiKey = process.env.NEXT_PUBLIC_GEMINI_API_KEY ?? "";
   const voice = pickVoice(personality, voiceStyle);
 
-  // Clean up on unmount
   useEffect(() => {
     return () => {
       try { recognitionRef.current?.abort(); } catch {}
-      try { sourceRef.current?.stop(); } catch {}
+      try { liveSessionRef.current?.close(); } catch {}
       audioCtxRef.current?.close();
     };
   }, []);
@@ -108,7 +109,6 @@ export function useVoiceAgent({
   const startListening = useCallback(
     (onTranscript: (text: string) => void) => {
       if (!isSpeechSupported) return;
-
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const SR = (window as any).SpeechRecognition ?? (window as any).webkitSpeechRecognition;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -122,7 +122,7 @@ export function useVoiceAgent({
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       rec.onresult = (e: any) => {
-        const text = e.results[0]?.[0]?.transcript?.trim() ?? "";
+        const text: string = e.results[0]?.[0]?.transcript?.trim() ?? "";
         if (text) {
           setLastTranscript(text);
           setVoiceState("processing");
@@ -146,74 +146,148 @@ export function useVoiceAgent({
     recognitionRef.current?.stop();
   }, []);
 
-  // ── State helpers ────────────────────────────────────────────────────────
-
   const setProcessing = useCallback(() => setVoiceState("processing"), []);
 
+  // ── Cancel speaking ───────────────────────────────────────────────────────
+
   const cancelSpeaking = useCallback(() => {
-    try { sourceRef.current?.stop(); } catch {}
-    sourceRef.current = null;
+    cancelledRef.current = true;
+    try { liveSessionRef.current?.close(); } catch {}
+    liveSessionRef.current = null;
+    try { lastSourceRef.current?.stop(); } catch {}
+    lastSourceRef.current = null;
+    if (typeof window !== "undefined" && "speechSynthesis" in window) {
+      window.speechSynthesis.cancel();
+    }
     setVoiceState("idle");
   }, []);
 
   const toggleEnabled = useCallback(() => {
     setIsEnabled((v) => {
       if (v) {
-        // Disabling — stop any active voice
         try { recognitionRef.current?.abort(); } catch {}
-        try { sourceRef.current?.stop(); } catch {}
+        cancelledRef.current = true;
+        try { liveSessionRef.current?.close(); } catch {}
+        liveSessionRef.current = null;
+        if (typeof window !== "undefined" && "speechSynthesis" in window) {
+          window.speechSynthesis.cancel();
+        }
         setVoiceState("idle");
       }
       return !v;
     });
   }, []);
 
-  // ── TTS via Gemini Live ───────────────────────────────────────────────────
+  // ── TTS via browser SpeechSynthesis (offline fallback) ──────────────────
+
+  const speakWithBrowserTTS = useCallback(
+    (text: string): Promise<void> => {
+      return new Promise((resolve) => {
+        if (typeof window === "undefined" || !("speechSynthesis" in window)) {
+          setVoiceState("idle");
+          resolve();
+          return;
+        }
+        window.speechSynthesis.cancel();
+        const utt = new SpeechSynthesisUtterance(text);
+        utt.rate = 1.05;
+        utt.pitch = 1.1;
+        // Pick a female-sounding voice if available
+        const voices = window.speechSynthesis.getVoices();
+        const femaleVoice =
+          voices.find((v) => /female|woman|girl/i.test(v.name)) ??
+          voices.find((v) => /samantha|victoria|karen|moira|tessa|fiona|veena/i.test(v.name)) ??
+          voices.find((v) => v.lang.startsWith("en")) ??
+          null;
+        if (femaleVoice) utt.voice = femaleVoice;
+        setVoiceState("speaking");
+        cancelledRef.current = false;
+        utt.onend = () => {
+          if (!cancelledRef.current) setVoiceState("idle");
+          resolve();
+        };
+        utt.onerror = () => {
+          if (!cancelledRef.current) setVoiceState("idle");
+          resolve();
+        };
+        window.speechSynthesis.speak(utt);
+      });
+    },
+    []
+  );
+
+  // ── TTS via Gemini Live (streaming playback) ──────────────────────────────
 
   const speakAsCharacter = useCallback(
     async (text: string): Promise<void> => {
-      if (!apiKey || !text.trim()) {
+      if (!text.trim()) {
         setVoiceState("idle");
         return;
       }
 
+      // Fall back to browser TTS when no Gemini API key is available
+      if (!apiKey) {
+        await speakWithBrowserTTS(text);
+        return;
+      }
+
       setVoiceState("speaking");
-      const chunks: Float32Array[] = [];
+      cancelledRef.current = false;
 
       try {
-        const { GoogleGenAI } = await import("@google/genai");
+        // Use the /web sub-path to guarantee the browser build (BrowserWebSocket)
+        const { GoogleGenAI } = await import("@google/genai/web");
         const ai = new GoogleGenAI({ apiKey });
 
-        // Reuse or create AudioContext (must be at 24 kHz to match Gemini PCM output)
+        // Reuse / recreate AudioContext at 24 kHz to match Gemini PCM output
         if (!audioCtxRef.current || audioCtxRef.current.state === "closed") {
           audioCtxRef.current = new AudioContext({ sampleRate: 24000 });
         }
         const ctx = audioCtxRef.current;
         if (ctx.state === "suspended") await ctx.resume();
 
+        // Reset streaming schedule
+        scheduledEndTimeRef.current = ctx.currentTime;
+        lastSourceRef.current = null;
+
+        /**
+         * Queue one decoded PCM chunk as a scheduled AudioBufferSource.
+         * Returns the source node so we can mark the last one for onended.
+         */
+        function scheduleChunk(samples: Float32Array): AudioBufferSourceNode {
+          const buf = ctx.createBuffer(1, samples.length, 24000);
+          buf.getChannelData(0).set(samples);
+          const src = ctx.createBufferSource();
+          src.buffer = buf;
+          src.connect(ctx.destination);
+          const startAt = Math.max(ctx.currentTime, scheduledEndTimeRef.current);
+          src.start(startAt);
+          scheduledEndTimeRef.current = startAt + buf.duration;
+          return src;
+        }
+
         const systemPrompt =
-          `You are ${characterName}. ` +
-          `Personality: ${personality}. ` +
-          `Voice style: ${voiceStyle}. ` +
-          `When given a line of dialogue, speak it verbatim with full emotion, ` +
-          `exactly as this character would. Do not add any commentary or extra words.`;
+          `You are a professional voice actor performing the role of ${characterName}. ` +
+          `Character personality: ${personality}. Voice style: ${voiceStyle}. ` +
+          `When the user sends text inside quotation marks, speak it verbatim with full ` +
+          `emotional expression fitting the character. Do not add any extra words, ` +
+          `commentary, or additional lines — only voice the quoted text.`;
 
         await new Promise<void>((resolve, reject) => {
-          let liveSession: { close: () => void; sendClientContent: (opts: unknown) => void } | null = null;
           let resolved = false;
 
-          const finish = () => {
+          const finish = (err?: unknown) => {
             if (resolved) return;
             resolved = true;
-            try { liveSession?.close(); } catch {}
-            setVoiceState("idle");
-            resolve();
+            liveSessionRef.current = null;
+            if (!cancelledRef.current) setVoiceState("idle");
+            if (err) reject(err); else resolve();
           };
 
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           (ai.live as any)
             .connect({
-              model: "gemini-2.0-flash-live-001",
+              model: "gemini-2.5-flash-native-audio-latest",
               config: {
                 responseModalities: ["AUDIO"],
                 systemInstruction: systemPrompt,
@@ -224,67 +298,63 @@ export function useVoiceAgent({
                 },
               },
               callbacks: {
+                onopen() {},
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 onmessage(msg: any) {
-                  // Collect incoming PCM audio chunks
+                  if (cancelledRef.current) { finish(); return; }
+
                   const parts = msg?.serverContent?.modelTurn?.parts ?? [];
                   for (const part of parts) {
-                    if (part?.inlineData?.mimeType?.includes("audio")) {
-                      chunks.push(base64PcmToFloat32(part.inlineData.data));
+                    if (part?.inlineData?.mimeType?.includes("audio") && part.inlineData.data) {
+                      const samples = base64PcmToFloat32(part.inlineData.data);
+                      const src = scheduleChunk(samples);
+                      lastSourceRef.current = src;
                     }
                   }
 
-                  // Model turn complete → stitch audio and play
-                  if (msg?.serverContent?.turnComplete && chunks.length > 0) {
-                    const totalLen = chunks.reduce((s, c) => s + c.length, 0);
-                    const buf = ctx.createBuffer(1, totalLen, 24000);
-                    const ch = buf.getChannelData(0);
-                    let off = 0;
-                    for (const c of chunks) { ch.set(c, off); off += c.length; }
-
-                    const src = ctx.createBufferSource();
-                    src.buffer = buf;
-                    src.connect(ctx.destination);
-                    sourceRef.current = src;
-                    src.onended = finish;
-                    src.start();
-                  } else if (msg?.serverContent?.turnComplete) {
-                    // No audio received (empty response)
-                    finish();
+                  // Turn complete — attach onended to the last scheduled source
+                  if (msg?.serverContent?.turnComplete) {
+                    if (lastSourceRef.current) {
+                      lastSourceRef.current.onended = () => finish();
+                    } else {
+                      // No audio was produced
+                      finish();
+                    }
+                    // Close the session — we don't need more data
+                    try { liveSessionRef.current?.close(); } catch {}
                   }
                 },
                 onclose() { finish(); },
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 onerror(e: any) {
                   console.error("[VoiceAgent] Gemini Live error:", e);
-                  if (!resolved) { resolved = true; setVoiceState("idle"); reject(e); }
+                  finish(e);
                 },
               },
             })
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             .then((session: any) => {
-              liveSession = session;
+              if (cancelledRef.current) { session.close(); finish(); return; }
+              liveSessionRef.current = session;
+              // Send the character's dialogue in quotes so the model reads it verbatim
               session.sendClientContent({
                 turns: [
                   {
                     role: "user",
-                    parts: [{ text: `Speak this dialogue: "${text}"` }],
+                    parts: [{ text: `"${text}"` }],
                   },
                 ],
                 turnComplete: true,
               });
             })
-            .catch((err: unknown) => {
-              console.error("[VoiceAgent] connect failed:", err);
-              if (!resolved) { resolved = true; setVoiceState("idle"); reject(err); }
-            });
+            .catch((err: unknown) => finish(err));
         });
       } catch (err) {
         console.error("[VoiceAgent] speakAsCharacter error:", err);
-        setVoiceState("idle");
+        if (!cancelledRef.current) setVoiceState("idle");
       }
     },
-    [apiKey, characterName, personality, voiceStyle, voice],
+    [apiKey, characterName, personality, voiceStyle, voice, speakWithBrowserTTS],
   );
 
   return {

@@ -17,7 +17,9 @@ export async function POST(req: NextRequest) {
       session,
       body.characterId,
       body.interactionMode,
-      body.message
+      body.message,
+      body.gestureContext ?? null,
+      body.selfieFrame ?? null
     );
 
     patchSession(body.sessionId, {

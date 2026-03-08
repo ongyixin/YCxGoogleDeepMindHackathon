@@ -724,3 +724,26 @@ body {
 .voice-bar:nth-child(5) { animation-delay: 0.32s; }
 .voice-bar:nth-child(6) { animation-delay: 0.40s; }
 .voice-bar:nth-child(7) { animation-delay: 0.48s; }
+
+/* ─── Character sprite talking animation ─────────────────────────────────── */
+
+/* Alternate between neutral and talking frame by toggling opacity */
+@keyframes mouthFlap {
+  0%, 45%  { opacity: 1; }
+  50%, 95% { opacity: 0; }
+  100%     { opacity: 1; }
+}
+
+/* Subtle vertical bob during speech */
+@keyframes talkBounce {
+  0%, 100% { transform: translateY(0px); }
+  50%      { transform: translateY(-2px); }
+}
+
+.animate-mouth-flap {
+  animation: mouthFlap 0.3s steps(1) infinite;
+}
+
+.animate-talk-bounce {
+  animation: talkBounce 0.3s ease-in-out infinite;
+}

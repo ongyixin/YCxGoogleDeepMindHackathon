@@ -111,6 +111,7 @@ export default function QuestPage() {
   const [audioEnabled, setAudioEnabled] = useState(false);
   const [objectiveSnapshots, setObjectiveSnapshots] = useState<ObjectiveSnapshot[]>([]);
   const [showGallery, setShowGallery] = useState(false);
+  const [phase, setPhase] = useState<UIPhase>("input");
   const cameraRef = useRef<CameraHandle>(null);
 
   // ── Session initialization ──────────────────────────────────────────────────
@@ -212,6 +213,12 @@ export default function QuestPage() {
     persistQuestSession(session);
   }, [session]);
 
+  // ── Derive quest state ──────────────────────────────────────────────────────
+  const questState = session?.questState ?? null;
+  const activeMission = questState?.missions.find((m) => m.status === "active") ?? null;
+  const briefedMission = questState?.missions.find((m) => m.status === "briefed") ?? null;
+  const latestNarration = session?.narrativeLog[session.narrativeLog.length - 1] ?? null;
+
   // Persist snapshots to sessionStorage when mission completes so recap page can read them
   useEffect(() => {
     if (phase === "done" && objectiveSnapshots.length > 0) {
@@ -220,14 +227,6 @@ export default function QuestPage() {
       } catch { /* silent — quota exceeded */ }
     }
   }, [phase, objectiveSnapshots]);
-
-  // ── Derive quest state ──────────────────────────────────────────────────────
-  const questState = session?.questState ?? null;
-  const activeMission = questState?.missions.find((m) => m.status === "active") ?? null;
-  const briefedMission = questState?.missions.find((m) => m.status === "briefed") ?? null;
-  const latestNarration = session?.narrativeLog[session.narrativeLog.length - 1] ?? null;
-
-  const [phase, setPhase] = useState<UIPhase>("input");
 
   // Sync phase with session state after init
   useEffect(() => {
