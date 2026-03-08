@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MCM Companion</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <div id="app">
+
+    <!-- Header -->
+    <header class="header">
+      <span class="header-title">♥ MCM COMPANION</span>
+      <button id="btn-settings-toggle" class="icon-btn" title="Settings">⚙</button>
+    </header>
+
+    <!-- Settings panel (hidden by default) -->
+    <section id="panel-settings" class="panel hidden">
+      <div class="section-label">API BASE URL</div>
+      <div class="input-row">
+        <input
+          id="input-api-url"
+          class="text-input"
+          type="url"
+          placeholder="http://localhost:3001"
+          spellcheck="false"
+        />
+        <button id="btn-save-settings" class="pill-btn">SAVE</button>
+      </div>
+      <p id="settings-status" class="status-text"></p>
+
+      <div class="separator"></div>
+      <div class="toggle-row">
+        <label class="toggle-label" for="toggle-proactive">PROACTIVE COMMENTS</label>
+        <label class="toggle">
+          <input type="checkbox" id="toggle-proactive" />
+          <span class="slider"></span>
+        </label>
+      </div>
+      <div class="toggle-row">
+        <label class="toggle-label" for="toggle-activity">TRACK ACTIVITY</label>
+        <label class="toggle">
+          <input type="checkbox" id="toggle-activity" />
+          <span class="slider"></span>
+        </label>
+      </div>
+    </section>
+
+    <!-- Import controls -->
+    <section id="panel-import" class="panel">
+      <button id="btn-import" class="cta-btn">↓ IMPORT FROM APP</button>
+      <p id="import-status" class="status-text"></p>
+    </section>
+
+    <!-- Character list -->
+    <section id="panel-characters" class="panel">
+      <div class="section-label">
+        YOUR CHARACTERS
+        <span id="char-count" class="dim"></span>
+      </div>
+
+      <div id="char-list" class="char-list">
+        <!-- Populated by popup.ts -->
+      </div>
+
+      <div id="empty-state" class="empty-state hidden">
+        <div class="empty-icon">📖</div>
+        <p class="empty-text">No characters imported yet.</p>
+        <p class="empty-sub">Open the app, save a character, then come back and tap Import.</p>
+      </div>
+    </section>
+
+    <!-- Open side panel CTA -->
+    <section id="panel-sidepanel" class="panel">
+      <button id="btn-open-sidepanel" class="outline-btn">↗ OPEN SIDE PANEL</button>
+    </section>
+
+  </div>
+
+  <script src="popup.js" type="module"></script>
+</body>
+</html>

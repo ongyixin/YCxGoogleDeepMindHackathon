@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MCM Companion</title>
+  <link rel="stylesheet" href="sidepanel.css" />
+</head>
+<body>
+  <div id="app">
+
+    <!-- No character selected -->
+    <div id="screen-empty" class="screen hidden">
+      <div class="empty-hero">
+        <div class="empty-icon">📖</div>
+        <p class="empty-title">NO CHARACTER ACTIVE</p>
+        <p class="empty-sub">Open the extension popup, import your characters, and select one to start chatting.</p>
+      </div>
+    </div>
+
+    <!-- Character loaded -->
+    <div id="screen-chat" class="screen hidden">
+
+      <!-- Character header -->
+      <header id="char-header" class="char-header">
+        <div id="char-portrait" class="char-portrait">
+          <!-- portrait img or emoji fallback -->
+        </div>
+        <div class="char-header-info">
+          <div id="char-name" class="char-name">—</div>
+          <div id="char-label" class="char-label">—</div>
+          <div id="char-state" class="char-state">—</div>
+        </div>
+        <div class="char-header-right">
+          <div id="rel-label" class="rel-label">NEUTRAL</div>
+          <div class="rel-bar-wrap">
+            <div id="rel-bar-fill" class="rel-bar-fill"></div>
+          </div>
+          <div id="rel-score" class="rel-score">0</div>
+        </div>
+      </header>
+
+      <!-- Context badge (shown when browser context is available) -->
+      <div id="context-badge" class="context-badge hidden">
+        <span id="context-badge-text" class="context-badge-text"></span>
+        <span id="context-badge-clear" class="context-badge-clear" title="Clear context">✕</span>
+      </div>
+
+      <!-- Activity tracker bar: current page being watched -->
+      <div id="activity-status" class="activity-bar hidden">
+        <span class="activity-eye">◉</span>
+        <span id="activity-text" class="activity-text"></span>
+        <button id="btn-show-feed" class="activity-feed-toggle" title="Show recent activity">HISTORY</button>
+      </div>
+
+      <!-- Activity feed (collapsible) -->
+      <div id="activity-feed" class="activity-feed hidden">
+        <div class="activity-feed-header">
+          <span class="activity-feed-title">RECENT BROWSING</span>
+          <button id="btn-hide-feed" class="ghost-btn-sm">✕</button>
+        </div>
+        <div id="activity-feed-list" class="activity-feed-list">
+          <!-- Populated by sidepanel.ts -->
+        </div>
+      </div>
+
+      <!-- Chat messages -->
+      <div id="chat-messages" class="chat-messages">
+        <!-- Populated dynamically -->
+      </div>
+
+      <!-- Typing indicator -->
+      <div id="typing-indicator" class="typing-indicator hidden">
+        <span></span><span></span><span></span>
+      </div>
+
+      <!-- Input area -->
+      <footer class="input-area">
+
+        <!-- Interaction mode selector -->
+        <div id="mode-selector" class="mode-selector">
+          <button class="mode-btn active" data-mode="befriend">BEFRIEND</button>
+          <button class="mode-btn" data-mode="flirt">FLIRT</button>
+          <button class="mode-btn" data-mode="interrogate">INTERROGATE</button>
+          <button class="mode-btn" data-mode="roast">ROAST</button>
+          <button class="mode-btn" data-mode="recruit">RECRUIT</button>
+          <button class="mode-btn" data-mode="apologize">APOLOGIZE</button>
+        </div>
+
+        <!-- Suggest button + message input -->
+        <div class="message-row">
+          <button id="btn-suggest" class="suggest-btn" title="Get a suggested message">✦</button>
+          <textarea
+            id="input-message"
+            class="message-input"
+            placeholder="Say something..."
+            rows="2"
+            maxlength="500"
+          ></textarea>
+          <button id="btn-send" class="send-btn">▶</button>
+        </div>
+
+        <!-- Options row -->
+        <div class="options-row">
+          <label class="option-toggle">
+            <input type="checkbox" id="toggle-context" checked />
+            <span class="option-label">INCLUDE BROWSER CONTEXT</span>
+          </label>
+          <button id="btn-clear-history" class="ghost-btn">CLEAR HISTORY</button>
+        </div>
+
+      </footer>
+    </div>
+
+  </div>
+
+  <script src="sidepanel.js" type="module"></script>
+</body>
+</html>

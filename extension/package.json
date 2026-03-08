@@ -1,0 +1,16 @@
+{
+  "name": "mcm-companion-extension",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Chrome extension companion for the MCM character system",
+  "scripts": {
+    "build": "bash build.sh",
+    "watch": "bash build.sh --watch",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.0.311",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.9.3"
+  }
+}
