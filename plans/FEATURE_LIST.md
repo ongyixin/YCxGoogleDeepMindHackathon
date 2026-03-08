@@ -4,7 +4,7 @@ These are the features I’d prioritize to make the project feel coherent, funny
 
 1. Real-world object detection and scene understanding
 
-User points phone camera at a room or environment
+User points phone camera at an object or environment
 
 System identifies major objects in view
 

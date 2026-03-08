@@ -48,10 +48,10 @@ export const Z = {
 
 export const MOCK_NARRATION_LINES = {
   story: [
-    "The lamp has noticed you. It does not look pleased.",
-    "Rumor has it the toaster and the microwave haven't spoken in three weeks.",
-    "A presence stirs. The coffee mug knows something.",
-    "The bookshelf is judging you. It always is.",
+    "The wall has noticed you. It does not look pleased.",
+    "Rumor has it the table and the chair haven't spoken in three weeks.",
+    "A presence stirs. The shirt you're wearing knows something.",
+    "The lights above you are judging you. It always is.",
   ],
   quest: [
     "Asset acquired. Proceed to next objective.",

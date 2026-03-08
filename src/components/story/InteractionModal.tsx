@@ -6,7 +6,7 @@ import { RelationshipBar } from "./RelationshipBar";
 import { AnimatedCharacterSprite } from "./AnimatedCharacterSprite";
 import { useVoiceAgent, type VoiceState } from "@/hooks/useVoiceAgent";
 import { DEMO_MODE } from "@/lib/constants";
-import { getDemoResponse } from "@/lib/demo/demo-data";
+import { getDemoResponse, getDemoSuggestion } from "@/lib/demo/demo-data";
 import type { ObjectCharacter, InteractionMode, CharacterExpression } from "@/types";
 
 async function fetchSuggestion(
@@ -97,10 +97,10 @@ function TypewriterText({ text, className }: { text: string; className?: string 
   }, [text]);
 
   return (
-    <p className={className}>
+    <span className={className}>
       {displayed}
       {!done && <span className="animate-blink" style={{ color: "#FFDE00" }}>▮</span>}
-    </p>
+    </span>
   );
 }
 
@@ -386,13 +386,24 @@ export function InteractionModal({
     if (!isLoading && lastResult) setLocalResult(lastResult);
   }, [lastResult, isLoading]);
 
-  // Auto-suggestion on mode change (skipped in demo mode — responses are hardcoded)
+  // Auto-suggestion on mode change
   useEffect(() => {
     if (isFirstRender.current) {
       isFirstRender.current = false;
       return;
     }
-    if (!selectedMode || DEMO_MODE) return;
+    if (!selectedMode) return;
+    
+    if (DEMO_MODE) {
+      // Use hardcoded demo suggestions
+      const suggestion = getDemoSuggestion(selectedMode);
+      if (suggestion) {
+        setMessage(suggestion);
+      }
+      return;
+    }
+    
+    // Live mode: fetch from API
     let cancelled = false;
     setSuggestingMessage(true);
     fetchSuggestion(selectedMode, character.name, character.personality).then((s) => {
@@ -441,7 +452,7 @@ export function InteractionModal({
         };
         setLocalResult(result);
         if (voice.isEnabled && demo.voiceScript) {
-          await voice.speakAsCharacter(demo.voiceScript);
+          void voice.speakAsCharacter(demo.voiceScript);
         }
         if (!overrideText) setMessage("");
         return;
@@ -452,7 +463,7 @@ export function InteractionModal({
         setLocalResult(result);
         // Auto-speak character response when voice mode is active
         if (voice.isEnabled && result.response) {
-          await voice.speakAsCharacter(result.response);
+          void voice.speakAsCharacter(result.response);
         }
       }
       if (!overrideText) setMessage("");
@@ -527,6 +538,31 @@ export function InteractionModal({
                 filter: "drop-shadow(0 8px 24px rgba(255,222,0,0.18)) drop-shadow(0 2px 8px rgba(0,0,0,0.8))",
               }}
             />
+            {/* Portrait-loading indicator — shown only while sprite is still generating */}
+            {!characterWithPortraits.portraitUrl && !Object.keys(localPortraits).some((k) => localPortraits[k as CharacterExpression]) && (
+              <motion.div
+                className="absolute bottom-3 left-1/2 -translate-x-1/2 flex items-center gap-1.5 px-2 py-1"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                style={{
+                  background: "rgba(6,4,14,0.82)",
+                  border: "1px solid rgba(255,222,0,0.25)",
+                }}
+              >
+                {[0, 1, 2].map((i) => (
+                  <motion.div
+                    key={i}
+                    className="w-1 h-1"
+                    style={{ background: "#FFDE00", borderRadius: 1 }}
+                    animate={{ opacity: [0.2, 1, 0.2] }}
+                    transition={{ duration: 0.8, delay: i * 0.2, repeat: Infinity }}
+                  />
+                ))}
+                <span className="font-pixel text-[8px]" style={{ color: "rgba(255,222,0,0.55)" }}>
+                  RENDERING SPRITE...
+                </span>
+              </motion.div>
+            )}
             <div className="absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-[rgba(204,0,0,0.22)] to-transparent pointer-events-none rounded-b-xl" />
           </div>
         </div>

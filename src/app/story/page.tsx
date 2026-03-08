@@ -85,8 +85,9 @@ function StoryContent() {
     if (DEMO_MODE) {
       const mock: SessionState = {
         ...MOCK_STORY_SESSION,
+        sceneGraph: { ...MOCK_STORY_SESSION.sceneGraph, objects: [] },
         storyState: MOCK_STORY_SESSION.storyState
-          ? { ...MOCK_STORY_SESSION.storyState, genre }
+          ? { ...MOCK_STORY_SESSION.storyState, genre, characters: [], relationships: [], activeQuests: [] }
           : undefined,
       };
       setSession(mock);
@@ -177,6 +178,44 @@ function StoryContent() {
     return () => window.removeEventListener("pointerdown", unlockAudio);
   }, []);
 
+  // ── Portrait background fetcher ──────────────────────────────────────────────
+  const fetchPortraitInBackground = useCallback(
+    (characterId: string, referenceFrame?: string) => {
+      if (!sessionId) return;
+      fetch("/api/portrait", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId, characterId, referenceFrame }),
+      })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((data) => {
+          if (!data?.portraits) return;
+          setSession((prev) => {
+            if (!prev?.storyState) return prev;
+            return {
+              ...prev,
+              storyState: {
+                ...prev.storyState,
+                characters: prev.storyState.characters.map((c) =>
+                  c.id === characterId
+                    ? { ...c, portraitUrl: data.portraits.neutral ?? c.portraitUrl, portraits: { ...c.portraits, ...data.portraits } }
+                    : c
+                ),
+              },
+            };
+          });
+          // If this character is currently open in the modal, propagate portraits update
+          setSelectedCharacter((prev) =>
+            prev?.id === characterId
+              ? { ...prev, portraitUrl: data.portraits.neutral ?? prev.portraitUrl, portraits: { ...prev.portraits, ...data.portraits } }
+              : prev
+          );
+        })
+        .catch(() => {});
+    },
+    [sessionId]
+  );
+
   // ── Scan handler ────────────────────────────────────────────────────────────
   const handleScan = useCallback(async () => {
     if (DEMO_MODE) {
@@ -208,7 +247,7 @@ function StoryContent() {
             ...prev.narrativeLog,
             {
               id: "demo-n-scan",
-              text: "A presence materializes. Candi has entered the scene — and she looks like trouble.",
+              text: "A presence materializes. Fizzy has entered the scene — and she looks like trouble.",
               tone: "dramatic" as const,
               timestamp: Date.now(),
               sourceMode: "story" as const,
@@ -221,8 +260,8 @@ function StoryContent() {
     }
     if (!sessionId || scanLoading) return;
     setScanLoading(true);
+    const frame = cameraRef.current?.captureFrame() ?? "";
     try {
-      const frame = cameraRef.current?.captureFrame() ?? "";
       const res = await fetch("/api/scan", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -245,13 +284,19 @@ function StoryContent() {
             }
           : prev
       );
+      // Kick off portrait generation in the background for each new character —
+      // scan returns immediately without portraits so the user can interact now.
+      const newCharacterIds = data.storyHooks?.newCharacters ?? [];
+      for (const cid of newCharacterIds) {
+        fetchPortraitInBackground(cid, frame || undefined);
+      }
       await fetchMusic();
     } catch (err) {
       console.error("[Story] Scan failed:", err);
     } finally {
       setScanLoading(false);
     }
-  }, [sessionId, scanLoading, fetchMusic]);
+  }, [sessionId, scanLoading, fetchMusic, fetchPortraitInBackground]);
 
   // ── Save character to collection ────────────────────────────────────────────
   const handleSaveCharacter = useCallback(

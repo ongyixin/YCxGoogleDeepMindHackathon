@@ -30,19 +30,30 @@ export function useFrontCamera(): UseFrontCameraReturn {
 
     async function start() {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: {
-            // "user" is ideal for mobile front camera; on desktop this is simply
-            // the webcam, so treat it as ideal rather than required.
-            facingMode: { ideal: "user" },
-            width: { ideal: 640 },
-            height: { ideal: 480 },
-          },
-          audio: false,
-        });
+        // Try with explicit "user" facing mode first (desktop webcam / mobile front camera)
+        let stream: MediaStream;
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: {
+              facingMode: "user",
+              width: { ideal: 640 },
+              height: { ideal: 480 },
+            },
+            audio: false,
+          });
+        } catch (err) {
+          // Fallback: try without facingMode constraint (for desktop compatibility)
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: {
+              width: { ideal: 640 },
+              height: { ideal: 480 },
+            },
+            audio: false,
+          });
+        }
 
         if (!active) {
-          stream.getTracks().forEach((t) => t.stop());
+          stream?.getTracks().forEach((t) => t.stop());
           return;
         }
 

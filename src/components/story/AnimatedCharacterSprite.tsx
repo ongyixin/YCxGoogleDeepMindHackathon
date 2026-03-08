@@ -6,11 +6,13 @@
  *
  * Talking animation:
  *   The base/mood expression sprite is always rendered as the body layer.
- *   When speaking, the "talking" sprite (mouth-open variant) is rendered as
- *   a second layer on top, clipped via CSS clip-path to the top ~38% of the
- *   container (the character's face/head region). This layer toggles opacity
- *   every 150 ms so only the mouth area appears to open and close — the body
- *   stays completely still.
+ *   A separate <MouthOverlay> component sits on top, clipped via CSS clip-path
+ *   to only a narrow mouth-region band (~18–30% from the top of the container).
+ *   This band toggles every 150 ms between the talking sprite (mouth-open) and
+ *   transparent, so ONLY the mouth appears to open and close — the rest of the
+ *   body and face stays completely still.
+ *   When no talking sprite is available, a synthetic CSS mouth (rounded rect)
+ *   expands/contracts to mimic speech.
  *
  * Expression switching:
  *   Maps character.emotionalState to the closest CharacterExpression so the
@@ -71,11 +73,73 @@ function getPortraitTheme(personality: string) {
 // ─── Size config ─────────────────────────────────────────────────────────────
 
 const SIZE_CONFIG = {
-  sm:   { px: 60,  emojiSize: "text-2xl" },
-  md:   { px: 80,  emojiSize: "text-3xl" },
-  lg:   { px: 140, emojiSize: "text-5xl" },
+  sm:   { px: 90,  emojiSize: "text-2xl" },
+  md:   { px: 120, emojiSize: "text-3xl" },
+  lg:   { px: 210, emojiSize: "text-5xl" },
   full: { px: 0,   emojiSize: "text-6xl" },  // px=0 means 100%
 };
+
+// ─── MouthOverlay ─────────────────────────────────────────────────────────────
+
+/**
+ * Isolated mouth animation layer.
+ *
+ * When a `talkingUrl` sprite exists: renders it absolutely on top of the body,
+ * clipped to a narrow mouth-region band (18–30% from the top of the container,
+ * 8% inset from each side). Only this thin strip alternates opacity, so only
+ * the mouth opens/closes while every other pixel stays still.
+ *
+ * When no sprite exists: renders a synthetic CSS pixel-art mouth (rounded rect)
+ * positioned at ~22% from top that expands vertically when `mouthOpen` is true.
+ */
+interface MouthOverlayProps {
+  talkingUrl: string | undefined;
+  mouthOpen: boolean;
+  imageRendering: React.CSSProperties["imageRendering"];
+}
+
+function MouthOverlay({ talkingUrl, mouthOpen, imageRendering }: MouthOverlayProps) {
+  if (talkingUrl) {
+    return (
+      <img
+        src={talkingUrl}
+        alt=""
+        aria-hidden
+        className="absolute inset-0 w-full h-full object-contain pointer-events-none"
+        style={{
+          imageRendering,
+          /**
+           * inset(top right bottom left)
+           * Keeps a horizontal band from 18% to 30% of the container height,
+           * with 8% inset from each side — targeting the mouth/lower-lip region
+           * of a full-body pixel art sprite without touching eyes, hair, or body.
+           */
+          clipPath: "inset(18% 8% 70% 8%)",
+          opacity: mouthOpen ? 1 : 0,
+          transition: "opacity 60ms linear",
+        }}
+      />
+    );
+  }
+
+  // Synthetic CSS mouth — always available, zero-network-cost fallback
+  return (
+    <div
+      aria-hidden
+      className="absolute pointer-events-none"
+      style={{
+        left: "30%",
+        width: "40%",
+        top: "22%",
+        height: mouthOpen ? "3.5%" : "1.2%",
+        background: "#1a0800",
+        borderRadius: mouthOpen ? "50% / 80%" : "3px",
+        transition: "height 70ms ease, border-radius 70ms ease",
+        opacity: 0.8,
+      }}
+    />
+  );
+}
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
@@ -103,22 +167,22 @@ export function AnimatedCharacterSprite({
   pixelated = true,
 }: AnimatedCharacterSpriteProps) {
   const isSpeaking = voiceState === "speaking";
-  const [showTalkingFrame, setShowTalkingFrame] = useState(false);
+  const [mouthOpen, setMouthOpen] = useState(false);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Toggle between base expression and talking frame while speaking
+  // Toggle mouth open/closed while speaking
   useEffect(() => {
     if (isSpeaking) {
-      setShowTalkingFrame(false);
+      setMouthOpen(false);
       intervalRef.current = setInterval(() => {
-        setShowTalkingFrame((v) => !v);
+        setMouthOpen((v) => !v);
       }, MOUTH_FLAP_INTERVAL_MS);
     } else {
       if (intervalRef.current) {
         clearInterval(intervalRef.current);
         intervalRef.current = null;
       }
-      setShowTalkingFrame(false);
+      setMouthOpen(false);
     }
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
@@ -134,8 +198,6 @@ export function AnimatedCharacterSprite({
     portraits.neutral ??
     character.portraitUrl;
 
-  // The talking overlay uses the talking sprite clipped to the face region.
-  // It is always pre-loaded but toggles opacity on each tick.
   const talkingUrl: string | undefined = portraits.talking;
 
   const sizeConf = SIZE_CONFIG[size];
@@ -169,23 +231,12 @@ export function AnimatedCharacterSprite({
             style={{ imageRendering }}
           />
 
-          {/*
-           * Face/mouth overlay — the talking sprite clipped to the top ~38%
-           * of the container (head region). Only this thin band alternates,
-           * so the body never moves and only the mouth appears to open/close.
-           * Pre-mounted with opacity 0 to avoid reload flicker on first toggle.
-           */}
-          {isSpeaking && talkingUrl && (
-            <img
-              src={talkingUrl}
-              alt=""
-              aria-hidden
-              className="absolute inset-0 w-full h-full object-contain"
-              style={{
-                imageRendering,
-                clipPath: "inset(0 0 62% 0)",
-                opacity: showTalkingFrame ? 1 : 0,
-              }}
+          {/* Mouth overlay — only the mouth region animates during speech */}
+          {isSpeaking && (
+            <MouthOverlay
+              talkingUrl={talkingUrl}
+              mouthOpen={mouthOpen}
+              imageRendering={imageRendering}
             />
           )}
         </>

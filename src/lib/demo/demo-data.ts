@@ -2,7 +2,7 @@
  * Demo mode data — deterministic character, scripted responses, and audio text.
  *
  * Used when DEMO_MODE = true so the app runs without any API calls.
- * The demo character is "Candi" — a pixel-art girl with a soda-can tab in her hair,
+ * The demo character is "Fizzy" — a pixel-art girl with a soda-can tab in her hair,
  * based on the static sprite at /images/demo/candi.png.
  *
  * Response selection:
@@ -15,9 +15,9 @@ import type { ObjectCharacter, InteractionMode, DetectedObject } from "@/types";
 // ─── Demo character ───────────────────────────────────────────────────────────
 
 export const DEMO_CHARACTER: ObjectCharacter = {
-  id: "demo-candi-01",
+  id: "demo-fizzy-01",
   objectLabel: "soda can",
-  name: "Candi",
+  name: "Fizzy",
   personality: "chaotic optimist",
   voiceStyle: "bubbly and energetic female",
   emotionalState: "excited",
@@ -27,7 +27,8 @@ export const DEMO_CHARACTER: ObjectCharacter = {
   portraitUrl: "/images/demo/candi.png",
   portraits: {
     neutral:   "/images/demo/candi.png",
-    talking:   "/images/demo/candi.png",
+    // talking intentionally omitted — triggers the CSS synthetic-mouth fallback
+    // in MouthOverlay since all demo sprites are the same image
     happy:     "/images/demo/candi.png",
     angry:     "/images/demo/candi.png",
     sad:       "/images/demo/candi.png",
@@ -36,7 +37,7 @@ export const DEMO_CHARACTER: ObjectCharacter = {
 };
 
 export const DEMO_SCENE_OBJECT: DetectedObject = {
-  id: "demo-candi-01",
+  id: "demo-fizzy-01",
   label: "soda can",
   salience: 0.92,
   position: "center",
@@ -137,4 +138,25 @@ export const DEMO_FALLBACK_RESPONSE: DemoResponse = {
 export function getDemoResponse(mode: InteractionMode | null): DemoResponse {
   if (!mode) return DEMO_FALLBACK_RESPONSE;
   return DEMO_RESPONSES[mode] ?? DEMO_FALLBACK_RESPONSE;
+}
+
+// ─── Suggestion prompts ────────────────────────────────────────────────────────
+
+/** Hardcoded user message suggestions for each interaction mode in demo mode */
+export const DEMO_SUGGESTIONS: Record<InteractionMode, string> = {
+  flirt: "You're looking pretty refreshing today, Fizzy.",
+  interrogate: "What do you know about what happened here?",
+  recruit: "I could use someone like you on my side. What do you say?",
+  befriend: "Hey Fizzy, want to be friends?",
+  roast: "You're just an empty can collecting dust.",
+  apologize: "I'm sorry if I've been rude. Can we start over?",
+  negotiate: "Let's make a deal. What do you want in exchange?",
+  ignore: "",
+};
+
+/**
+ * Returns a hardcoded suggestion prompt for the given interaction mode in demo mode.
+ */
+export function getDemoSuggestion(mode: InteractionMode): string {
+  return DEMO_SUGGESTIONS[mode] ?? "";
 }
