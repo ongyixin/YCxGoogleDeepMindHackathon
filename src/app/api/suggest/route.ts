@@ -35,6 +35,16 @@ const FALLBACKS: Record<InteractionMode, string[]> = {
     "I was wrong, and I owe you a real apology.",
     "I should have handled that better — please forgive me.",
   ],
+  negotiate: [
+    "I think we can find a deal that works for both of us.",
+    "Let's talk terms — what would it take to make this work?",
+    "I'm willing to compromise if you are.",
+  ],
+  ignore: [
+    "...",
+    "*walks past without a word*",
+    "*pretends not to notice*",
+  ],
 };
 
 function pickFallback(mode: InteractionMode): string {
@@ -49,6 +59,8 @@ const MODE_DESCRIPTIONS: Record<InteractionMode, string> = {
   befriend:    "warm, genuine, and curious about them",
   roast:       "playfully insulting, sharp, and witty",
   apologize:   "apologetic, sincere, and vulnerable",
+  negotiate:   "calculated, strategic, and looking for mutual benefit",
+  ignore:      "dismissive, cold, and deliberately distant",
 };
 
 export async function POST(req: NextRequest) {

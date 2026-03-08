@@ -2,7 +2,7 @@
 
 import { motion } from "framer-motion";
 import { cn } from "@/lib/cn";
-import { relationshipLabel, relationshipColor } from "@/lib/story/relationships";
+import { relationshipLabel } from "@/lib/story/relationships";
 
 interface RelationshipBarProps {
   score: number;        // -100 to 100
@@ -18,19 +18,13 @@ function scoreToSegments(score: number, total: number): number {
 }
 
 function scoreToColor(score: number): string {
-  if (score >= 60) return "#FFDE00";
-  if (score >= 30) return "#FFDE00";
-  if (score >= -30) return "rgba(255,255,255,0.5)";
-  if (score >= -60) return "#CC0000";
-  return "#FF0000";
-}
-
-function scoreToLabel(score: number): string {
-  if (score >= 60) return "DEVOTED";
-  if (score >= 30) return "FRIENDLY";
-  if (score >= -30) return "NEUTRAL";
-  if (score >= -60) return "HOSTILE";
-  return "ENEMY";
+  if (score >= 70) return "#FFDE00";           // devoted
+  if (score >= 40) return "#FFDE00";           // friendly
+  if (score >= 10) return "rgba(255,255,255,0.7)"; // warming up
+  if (score >= -10) return "rgba(255,255,255,0.5)"; // neutral
+  if (score >= -40) return "#FF9900";          // suspicious
+  if (score >= -70) return "#CC0000";          // hostile
+  return "#FF0000";                            // nemesis
 }
 
 function deltaLabel(delta: number): string {
@@ -47,7 +41,7 @@ export function RelationshipBar({
   const TOTAL_SEGMENTS = compact ? 12 : 16;
   const filledSegs = scoreToSegments(score, TOTAL_SEGMENTS);
   const color = scoreToColor(score);
-  const label = scoreToLabel(score);
+  const label = relationshipLabel(score).toUpperCase();
 
   return (
     <div className={cn("flex flex-col gap-1", className)}>

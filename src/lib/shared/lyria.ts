@@ -57,23 +57,23 @@ function getAuthHeaders(): Record<string, string> {
 // ─── Prompt construction ──────────────────────────────────────────────────────
 
 const MOOD_PROMPTS: Record<string, string> = {
-  neutral:          "calm neutral background music, minimal texture, ambient",
-  ambient:          "soft ambient music, atmospheric pads, peaceful and subtle",
-  romantic:         "romantic music with gentle piano and soft strings, tender and warm",
-  suspenseful:      "suspenseful underscore, low drones and building tension, mysterious strings",
-  chaotic:          "chaotic dissonant music, frantic brass and percussion, intense and unstable",
-  tragic:           "tragic music with mournful cello and sparse piano, slow and emotional",
-  comedic:          "playful comedic music, bouncy woodwinds and whimsical stabs, lighthearted",
-  focused:          "focused lo-fi instrumental, minimal steady beats, clean and productive",
-  driving:          "driving electronic music, punchy bass and energetic synths, forward momentum",
-  triumphant:       "triumphant orchestral music, full brass and percussion swell, victorious",
-  urgent:           "urgent music, rapid staccato strings, fast pulse, high tension",
-  idle:             "sparse ambient music, very quiet, minimal, waiting atmosphere",
-  "tension-rising": "escalating tension music, slowly building intensity, suspenseful strings",
-  victory:          "victory fanfare, celebratory brass, triumphant and uplifting",
-  action:           "high-energy action music, fast-paced synths and drums, intense",
-  dialogue:         "subtle conversation background, soft and unobtrusive, warm tone",
-  "ambient-explore":"exploration ambient music, open airy pads, curious and unhurried",
+  neutral:          "neutral ambient underscore, sparse texture, open space, no melody",
+  ambient:          "atmospheric soundscape, gentle tonal pads, soft harmonic layers, no melody",
+  romantic:         "warm intimate instrumental, slow harmonic movement, tender emotional tone",
+  suspenseful:      "tense underscore, low sustained tones, gradual harmonic buildup, uneasy",
+  chaotic:          "dissonant instrumental, irregular rhythmic patterns, unstable layered textures",
+  tragic:           "somber slow instrumental, sparse harmonic content, melancholic emotional tone",
+  comedic:          "lighthearted upbeat instrumental, playful staccato phrases, whimsical rhythm",
+  focused:          "minimal steady instrumental, consistent beat, clean sparse arrangement",
+  driving:          "energetic electronic instrumental, rhythmic bass movement, forward momentum",
+  triumphant:       "powerful uplifting instrumental, full harmonic swell, bold dynamic range",
+  urgent:           "fast-paced tense instrumental, rapid rhythmic pulse, high energy",
+  idle:             "very sparse ambient soundscape, near silence, minimal tonal presence",
+  "tension-rising": "slowly building tense underscore, rising harmonic intensity, mounting pressure",
+  victory:          "celebratory uplifting instrumental, bright harmonic resolution, energetic",
+  action:           "intense fast instrumental, heavy rhythmic drive, layered energetic texture",
+  dialogue:         "quiet warm background underscore, unobtrusive harmonic texture, conversational feel",
+  "ambient-explore":"open exploratory soundscape, airy harmonic layers, curious unhurried quality",
 };
 
 const TEMPO_HINTS: Record<string, string> = {
@@ -99,8 +99,8 @@ function buildPrompt(signal: LyriaControlSignal): { prompt: string; negative_pro
       : "";
 
   return {
-    prompt: `${moodDesc}, ${tempoHint}, ${intensityHint}, ${modeHint}${envHint}, instrumental only`,
-    negative_prompt: "vocals, singing, lyrics, voice, spoken word",
+    prompt: `${moodDesc}, ${tempoHint}, ${intensityHint}, ${modeHint}${envHint}, instrumental only, original composition`,
+    negative_prompt: "vocals, singing, lyrics, voice, spoken word, recognizable melody, copyrighted music, named compositions",
   };
 }
 

@@ -1,8 +1,7 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { cn } from "@/lib/cn";
-import { relationshipLabel, relationshipColor } from "@/lib/story/relationships";
+
 import type { ObjectCharacter } from "@/types";
 
 interface ObjectLabelProps {
@@ -76,14 +75,6 @@ function getEmoji(emotionalState: string): string {
   return "✦";
 }
 
-// Relationship color map for pixel style
-function getRelColor(score: number): string {
-  if (score >= 60) return "#FFDE00";
-  if (score >= 30) return "#FFDE00";
-  if (score >= -30) return "rgba(255,255,255,0.5)";
-  if (score >= -60) return "#CC0000";
-  return "#FF0000";
-}
 
 export function ObjectLabel({
   character,
@@ -104,15 +95,11 @@ export function ObjectLabel({
   const handleClick = onTap ? () => onTap(character) : onClick ?? (() => {});
   const effectiveSelected = isActive ?? isSelected;
   const effectiveDelay = delay ?? index * 0.12;
-  const relLabel = relationshipLabel(character.relationshipToUser);
   const emoji = getEmoji(character.emotionalState);
-  const relColor = getRelColor(character.relationshipToUser);
-  const filledSegs = Math.round((Math.abs(character.relationshipToUser) / 100) * 6);
-  const isPositive = character.relationshipToUser >= 0;
 
   return (
     <motion.button
-      className="absolute z-[10] touch-target cursor-pointer flex flex-col items-center gap-0"
+      className="absolute z-[10] touch-target cursor-pointer flex flex-col items-center gap-1"
       style={posStyle}
       onClick={handleClick}
       initial={{ opacity: 0, scale: 0.5, y: 10 }}
@@ -122,72 +109,62 @@ export function ObjectLabel({
       whileTap={{ scale: 0.90 }}
       aria-label={`Talk to ${character.name}`}
     >
-      {/* NPC name tag */}
+      {/* Avatar */}
       <div
         style={{
-          background: effectiveSelected ? "rgba(204,0,0,0.92)" : "rgba(6,4,14,0.90)",
+          width: 72,
+          height: 72,
           border: `2px solid ${effectiveSelected ? "#FFDE00" : "#CC0000"}`,
           boxShadow: effectiveSelected
-            ? "3px 3px 0 rgba(255,222,0,0.4), 0 0 12px rgba(255,222,0,0.2)"
-            : "2px 2px 0 rgba(204,0,0,0.5)",
-          padding: "5px 8px",
-          minWidth: 90,
+            ? "0 0 0 2px rgba(255,222,0,0.35), 0 0 18px rgba(255,222,0,0.25)"
+            : "0 0 0 1px rgba(204,0,0,0.4), 2px 2px 0 rgba(204,0,0,0.5)",
+          overflow: "hidden",
+          flexShrink: 0,
+          background: "rgba(6,4,14,0.75)",
+          imageRendering: "pixelated",
         }}
       >
-        {/* Emotion + Name */}
-        <div className="flex items-center gap-1.5 mb-0.5">
-          {character.portraitUrl ? (
-            <img
-              src={character.portraitUrl}
-              alt={character.name}
-              className="w-5 h-5 rounded-sm object-cover border border-[#FFDE00]/50"
-            />
-          ) : (
-            <span className="text-base leading-none">{emoji}</span>
-          )}
-          <span
-            className="font-pixel text-base whitespace-nowrap"
-            style={{ color: effectiveSelected ? "#FFDE00" : "#FFF0B0" }}
-          >
-            {character.name}
-          </span>
-        </div>
-
-        {/* Personality subtitle */}
-        <p className="font-vt text-base" style={{ color: "rgba(255,255,255,0.45)" }}>
-          {character.personality}
-        </p>
-
-        {/* Segmented relationship bar */}
-        <div className="flex items-center gap-1 mt-1.5">
-          <div className="flex gap-0.5">
-            {Array.from({ length: 6 }).map((_, i) => (
-              <div
-                key={i}
-                className="w-2 h-1.5"
-                style={{
-                  border: `1px solid ${relColor}`,
-                  background: i < filledSegs ? relColor : "transparent",
-                }}
-              />
-            ))}
+        {character.portraitUrl ? (
+          <img
+            src={character.portraitUrl}
+            alt={character.name}
+            style={{ width: "100%", height: "100%", objectFit: "cover", imageRendering: "pixelated" }}
+          />
+        ) : (
+          <div className="w-full h-full flex items-center justify-center">
+            <span style={{ fontSize: 32, lineHeight: 1 }}>{emoji}</span>
           </div>
-          <span className="font-pixel text-base" style={{ color: relColor }}>
-            {relLabel.toUpperCase().slice(0, 4)}
-          </span>
-        </div>
+        )}
       </div>
+
+      {/* Name label */}
+      <span
+        className="font-pixel whitespace-nowrap"
+        style={{
+          fontSize: 9,
+          letterSpacing: "0.04em",
+          color: effectiveSelected ? "#FFDE00" : "#FFF0B0",
+          textShadow: "0 1px 4px rgba(0,0,0,0.9), 0 0 8px rgba(0,0,0,0.8)",
+          maxWidth: 90,
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          display: "block",
+          textAlign: "center",
+        }}
+      >
+        {character.name}
+      </span>
 
       {/* Selection indicator */}
       {effectiveSelected && (
         <motion.div
           initial={{ opacity: 0, y: -2 }}
           animate={{ opacity: 1, y: 0 }}
-          className="mt-0.5"
+          className="mt-0"
         >
           <span
-            className="font-pixel text-base animate-blink"
-            style={{ color: "#FFDE00" }}
+            className="font-pixel animate-blink"
+            style={{ fontSize: 9, color: "#FFDE00" }}
           >
             ▼ TALKING
           </span>

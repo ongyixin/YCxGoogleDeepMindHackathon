@@ -8,6 +8,8 @@ export { default as CommunityPanel } from "./CommunityPanel";
 export { default as SettingsPanel } from "./SettingsPanel";
 export type { Settings } from "./SettingsPanel";
 export { default as QuickStats } from "./QuickStats";
+export { default as QuestLogPanel } from "./QuestLogPanel";
 export { default as TwinklingStars } from "./TwinklingStars";
 export { default as PixelCharacter } from "./PixelCharacter";
 export { PlayIcon, QuestionIcon, InfoIcon, ShieldIcon, GearIcon, SoundOnIcon, SoundOffIcon, CameraIcon, MaskIcon, SwordIcon, BoltIcon } from "./PixelIcons";
+export { default as CharacterCollection } from "./CharacterCollection";

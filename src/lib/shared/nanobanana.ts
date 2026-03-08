@@ -2,6 +2,7 @@
 // Powered by Imagen 3 via Google AI API, with Gemini Flash image generation as fallback.
 // Falls back to emoji placeholders when all generation paths are unavailable.
 
+import { Jimp } from "jimp";
 import type {
   NanoBananaRequest,
   NanoBananaResponse,
@@ -61,18 +62,29 @@ async function generateWithImagen(prompt: string): Promise<string | null> {
 }
 
 /**
- * Try Gemini 2.0 Flash image generation as a fallback.
- * Returns the first image part from the response.
+ * Try Gemini 2.0 Flash image generation.
+ * When referenceImage (raw base64 JPEG) is provided it is included as an inlineData
+ * part so Gemini can use the camera snapshot as a visual reference.
  */
-async function generateWithGeminiFlash(prompt: string): Promise<string | null> {
+async function generateWithGeminiFlash(
+  prompt: string,
+  referenceImage?: string
+): Promise<string | null> {
   const apiKey = env.GEMINI_API_KEY;
   if (!apiKey) return null;
+
+  const parts: Array<Record<string, unknown>> = [];
+  if (referenceImage) {
+    const data = referenceImage.replace(/^data:image\/\w+;base64,/, "");
+    parts.push({ inlineData: { mimeType: "image/jpeg", data } });
+  }
+  parts.push({ text: prompt });
 
   const response = await fetch(`${GEMINI_FLASH_IMAGE_ENDPOINT}?key=${apiKey}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      contents: [{ parts: [{ text: prompt }] }],
+      contents: [{ parts }],
       generationConfig: {
         responseModalities: ["IMAGE", "TEXT"],
       },
@@ -84,11 +96,11 @@ async function generateWithGeminiFlash(prompt: string): Promise<string | null> {
     throw new Error(`Gemini Flash image API ${response.status}: ${errText}`);
   }
 
-  const data = await response.json();
-  const parts: Array<{ inlineData?: { mimeType?: string; data?: string } }> =
-    data?.candidates?.[0]?.content?.parts ?? [];
+  const responseData = await response.json();
+  const responseParts: Array<{ inlineData?: { mimeType?: string; data?: string } }> =
+    responseData?.candidates?.[0]?.content?.parts ?? [];
 
-  for (const part of parts) {
+  for (const part of responseParts) {
     if (part?.inlineData?.data) {
       const mimeType = part.inlineData.mimeType ?? "image/png";
       return `data:${mimeType};base64,${part.inlineData.data}`;
@@ -97,25 +109,128 @@ async function generateWithGeminiFlash(prompt: string): Promise<string | null> {
   return null;
 }
 
+/**
+ * Removes the white background from a PNG data URL using a flood-fill (magic wand)
+ * approach seeded from the four corners, then feathers the resulting alpha mask.
+ * Returns a new PNG data URL with a transparent background, or the original on error.
+ */
+async function removeBackgroundMagicWand(
+  dataUrl: string,
+  featherRadius = 3,
+  tolerance = 30
+): Promise<string> {
+  try {
+    const base64 = dataUrl.replace(/^data:image\/\w+;base64,/, "");
+    const inputBuffer = Buffer.from(base64, "base64");
+    const image = await Jimp.read(inputBuffer);
+    const { width, height } = image.bitmap;
+
+    const isNearWhite = (idx: number) => {
+      const r = image.bitmap.data[idx];
+      const g = image.bitmap.data[idx + 1];
+      const b = image.bitmap.data[idx + 2];
+      return (255 - r) < tolerance && (255 - g) < tolerance && (255 - b) < tolerance;
+    };
+
+    // BFS flood-fill from corners to identify connected white background pixels
+    const mask = new Uint8Array(width * height); // 0 = foreground, 255 = background
+    const visited = new Uint8Array(width * height);
+    const queue: [number, number][] = [];
+
+    const corners: [number, number][] = [
+      [0, 0], [width - 1, 0], [0, height - 1], [width - 1, height - 1],
+    ];
+    for (const [cx, cy] of corners) {
+      const idx = (cy * width + cx) * 4;
+      if (!visited[cy * width + cx] && isNearWhite(idx)) {
+        visited[cy * width + cx] = 1;
+        queue.push([cx, cy]);
+      }
+    }
+
+    while (queue.length > 0) {
+      const [x, y] = queue.shift()!;
+      mask[y * width + x] = 255;
+      for (const [nx, ny] of [[x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1]] as [number, number][]) {
+        if (nx >= 0 && nx < width && ny >= 0 && ny < height && !visited[ny * width + nx]) {
+          const nIdx = (ny * width + nx) * 4;
+          if (isNearWhite(nIdx)) {
+            visited[ny * width + nx] = 1;
+            queue.push([nx, ny]);
+          }
+        }
+      }
+    }
+
+    // Apply mask + optional feathering via a blurred alpha channel
+    if (featherRadius > 0) {
+      const alphaBuffer = Buffer.alloc(width * height * 4);
+      for (let i = 0; i < width * height; i++) {
+        const val = mask[i] === 255 ? 0 : 255;
+        alphaBuffer[i * 4] = val;
+        alphaBuffer[i * 4 + 1] = val;
+        alphaBuffer[i * 4 + 2] = val;
+        alphaBuffer[i * 4 + 3] = 255;
+      }
+      const alphaImg = new Jimp({ data: alphaBuffer, width, height });
+      alphaImg.blur(featherRadius);
+
+      for (let i = 0; i < width * height; i++) {
+        image.bitmap.data[i * 4 + 3] = alphaImg.bitmap.data[i * 4]; // r-channel of blurred mask
+      }
+    } else {
+      for (let i = 0; i < width * height; i++) {
+        if (mask[i] === 255) image.bitmap.data[i * 4 + 3] = 0;
+      }
+    }
+
+    const outputBuffer = await image.getBuffer("image/png");
+    return `data:image/png;base64,${outputBuffer.toString("base64")}`;
+  } catch (err) {
+    console.error("[nanobanana] Background removal failed:", err);
+    return dataUrl; // Return original on failure
+  }
+}
+
 export const visualGenerator: IVisualGenerator = {
   async generate(req: NanoBananaRequest): Promise<NanoBananaResponse> {
     const hasAnyKey = !!(env.NANOBANANA_API_KEY || env.GEMINI_API_KEY);
 
     if (hasAnyKey) {
-      // Primary: Imagen 3
-      try {
-        const imageUrl = await generateWithImagen(req.prompt);
-        if (imageUrl) return { imageUrl, isFallback: false };
-      } catch (err) {
-        console.error("[nanobanana] Imagen 3 failed:", err);
-      }
+      // When a reference image is provided, skip Imagen 3 (text-only) and go
+      // straight to Gemini Flash which supports multimodal input.
+      if (req.referenceImage) {
+        try {
+          const imageUrl = await generateWithGeminiFlash(req.prompt, req.referenceImage);
+          if (imageUrl) {
+            const processed = await removeBackgroundMagicWand(imageUrl);
+            return { imageUrl: processed, isFallback: false };
+          }
+        } catch (err) {
+          console.error("[nanobanana] Gemini Flash image gen (with reference) failed:", err);
+        }
+      } else {
+        // Primary: Imagen 3
+        try {
+          const imageUrl = await generateWithImagen(req.prompt);
+          if (imageUrl) {
+            const processed = await removeBackgroundMagicWand(imageUrl);
+            return { imageUrl: processed, isFallback: false };
+          }
+        } catch (err) {
+          console.error("[nanobanana] Imagen 3 failed:", err);
+        }
 
-      // Secondary: Gemini 2.0 Flash image generation
-      try {
-        const imageUrl = await generateWithGeminiFlash(req.prompt);
-        if (imageUrl) return { imageUrl, isFallback: false };
-      } catch (err) {
-        console.error("[nanobanana] Gemini Flash image gen failed:", err);
+        // Secondary: Gemini 2.0 Flash image generation
+        try {
+          const imageUrl = await generateWithGeminiFlash(req.prompt);
+          if (imageUrl) {
+            const processed = await removeBackgroundMagicWand(imageUrl);
+            return { imageUrl: processed, isFallback: false };
+          }
+        } catch (err) {
+          console.error("[nanobanana] Gemini Flash image gen failed:", err);
+        }
       }
     }
 

@@ -317,6 +317,15 @@ export interface MissionObjective {
   completed: boolean;
 }
 
+export interface ObjectiveSnapshot {
+  objectiveId: string;
+  missionId: string;
+  objectiveDescription: string;
+  /** Full data URL — data:image/jpeg;base64,... */
+  dataUrl: string;
+  capturedAt: number;
+}
+
 export interface MomentumState {
   currentCombo: number;
   sessionProductivityScore: number; // 0–100
@@ -507,6 +516,8 @@ export interface NanoBananaRequest {
   prompt: string;
   style?: string;
   sessionContext?: unknown;
+  /** Raw base64 JPEG (no data-URI prefix) to use as a reference image for generation. */
+  referenceImage?: string;
 }
 
 export interface NanoBananaResponse {
@@ -587,6 +598,18 @@ export interface QuestScanUpdate {
   missionActivations: string[];
 }
 
+// ─── Gesture detection ────────────────────────────────────────────────────────
+
+/** Real-time gesture snapshot captured from the front camera via MediaPipe. */
+export interface GestureContext {
+  /** Normalised gesture label e.g. "thumbs_up", "victory", "open_palm" */
+  gesture: string;
+  /** Detection confidence 0–1 */
+  confidence: number;
+  /** Unix timestamp of the detection */
+  timestamp: number;
+}
+
 // ─── Talk API (Story Mode) ────────────────────────────────────────────────────
 
 export interface TalkRequest {
@@ -594,6 +617,10 @@ export interface TalkRequest {
   characterId: string;
   interactionMode: InteractionMode;
   message: string;
+  /** Optional real-time gesture the user is showing via the front camera */
+  gestureContext?: GestureContext;
+  /** Optional base64 JPEG selfie frame from the front camera (no data-URI prefix) */
+  selfieFrame?: string;
 }
 
 export interface TalkResponse {
@@ -680,4 +707,22 @@ export interface ProgressResponse {
 
 export interface PosterRequest {
   sessionId: string;
+}
+
+// ─── Character Collection (localStorage) ─────────────────────────────────────
+
+/** A character saved to the player's permanent collection index. */
+export interface SavedCharacter {
+  id: string;
+  objectLabel: string;
+  name: string;
+  personality: string;
+  voiceStyle: string;
+  emotionalState: string;
+  portraitUrl?: string;
+  genre: StoryGenre;
+  relationshipScore: number;
+  savedAt: number;
+  memories: string[];
+  interactionCount: number;
 }

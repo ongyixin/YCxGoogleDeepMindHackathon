@@ -12,11 +12,14 @@ import {
   CommunityPanel,
   SettingsPanel,
   QuickStats,
+  QuestLogPanel,
   TwinklingStars,
   PixelCharacter,
   MaskIcon,
   BoltIcon,
+  CharacterCollection,
 } from "@/components/landing";
+import { getSavedCharacterCount } from "@/lib/shared/characterCollection";
 import type { TabId, Settings } from "@/components/landing";
 
 // ─── Utilities ────────────────────────────────────────────────────────────────
@@ -359,7 +362,7 @@ function TitleCard({ wide = false, onStart }: { wide?: boolean; onStart?: () => 
               <p
                 className="font-pixel"
                 style={{
-                  fontSize: wide ? 18 : 16,
+                  fontSize: wide ? 22 : 22,
                   lineHeight: wide ? 1.2 : 2,
                   color: "#FFDE00",
                   letterSpacing: "0.2em",
@@ -371,7 +374,7 @@ function TitleCard({ wide = false, onStart }: { wide?: boolean; onStart?: () => 
               <motion.p
                 className="font-pixel"
                 style={{
-                  fontSize: wide ? 20 : 18,
+                  fontSize: wide ? 24 : 24,
                   lineHeight: wide ? 1.2 : 1.9,
                   color: "#FFDE00",
                   letterSpacing: "0.16em",
@@ -390,7 +393,7 @@ function TitleCard({ wide = false, onStart }: { wide?: boolean; onStart?: () => 
               <motion.p
                 className="font-pixel"
                 style={{
-                  fontSize: wide ? 26 : 22,
+                  fontSize: wide ? 30 : 28,
                   lineHeight: wide ? 1.2 : 1.8,
                   color: "#B0C4FF",
                   letterSpacing: "0.12em",
@@ -667,11 +670,19 @@ function PlayTabModeSelect({
   activeMode,
   setActiveMode,
   onEnter,
+  onOpenLog,
+  onOpenCollection,
 }: {
   activeMode: "story" | "quest";
   setActiveMode: (m: "story" | "quest") => void;
   onEnter: () => void;
+  onOpenLog: () => void;
+  onOpenCollection: () => void;
 }) {
+  const [characterCount, setCharacterCount] = React.useState(0);
+  React.useEffect(() => {
+    setCharacterCount(getSavedCharacterCount());
+  }, []);
   return (
     <motion.div
       key="mode-select"
@@ -770,6 +781,49 @@ function PlayTabModeSelect({
         {/* Quick stats row */}
         <QuickStats />
 
+        {/* Secondary actions row — Field Logs + Character Index */}
+        <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+          <button
+            onClick={onOpenLog}
+            className="font-pixel flex items-center justify-between px-3 py-2"
+            style={{
+              flex: 1,
+              border: "1px solid rgba(59,76,202,0.28)",
+              background: "rgba(5,2,20,0.75)",
+              color: "rgba(176,196,255,0.45)",
+              fontSize: 11,
+              letterSpacing: "0.15em",
+            }}
+          >
+            <span>◈ FIELD LOGS</span>
+            <span style={{ color: "rgba(255,255,255,0.18)", fontSize: 10 }}>▶</span>
+          </button>
+
+          <button
+            onClick={onOpenCollection}
+            className="font-pixel flex items-center justify-between px-3 py-2"
+            style={{
+              flex: 1,
+              border: "1px solid rgba(200,75,122,0.32)",
+              background: "rgba(5,2,20,0.75)",
+              color: "rgba(232,112,154,0.55)",
+              fontSize: 11,
+              letterSpacing: "0.12em",
+              position: "relative",
+            }}
+          >
+            <span>♥ CHARACTERS</span>
+            <span
+              style={{
+                color: characterCount > 0 ? "rgba(232,112,154,0.9)" : "rgba(255,255,255,0.18)",
+                fontSize: 10,
+              }}
+            >
+              {characterCount > 0 ? `${characterCount} ▶` : "▶"}
+            </span>
+          </button>
+        </div>
+
         {/* Enter button */}
         <motion.button
           onClick={onEnter}
@@ -867,7 +921,7 @@ function PlayTabGenreSelect({
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 type AppScreen = "intro" | "main";
-type PlayScreen = "mode_select" | "genre_select";
+type PlayScreen = "mode_select" | "genre_select" | "quest_log" | "collection";
 
 const DEFAULT_SETTINGS: Settings = { sound: false, crt: true, pixelGrid: true };
 
@@ -1046,6 +1100,8 @@ export default function HomePage() {
                 activeMode={activeMode}
                 setActiveMode={setActiveMode}
                 onEnter={handleEnter}
+                onOpenLog={() => setPlayScreen("quest_log")}
+                onOpenCollection={() => setPlayScreen("collection")}
               />
             )}
             {activeTab === "play" && playScreen === "genre_select" && (
@@ -1054,6 +1110,18 @@ export default function HomePage() {
                 onBack={() => setPlayScreen("mode_select")}
                 onGenreSelect={handleGenreSelect}
                 entering={entering}
+              />
+            )}
+            {activeTab === "play" && playScreen === "quest_log" && (
+              <QuestLogPanel
+                key="play-log"
+                onBack={() => setPlayScreen("mode_select")}
+              />
+            )}
+            {activeTab === "play" && playScreen === "collection" && (
+              <CharacterCollection
+                key="play-collection"
+                onBack={() => setPlayScreen("mode_select")}
               />
             )}
             {activeTab === "howtoplay" && <HowToPlay key="howtoplay" />}

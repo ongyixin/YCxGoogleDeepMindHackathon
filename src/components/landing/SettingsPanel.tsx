@@ -1,6 +1,7 @@
 "use client";
 
 import { motion } from "framer-motion";
+import { MusicNoteIcon, MonitorIcon, GridIcon } from "./PixelIcons";
 
 export interface Settings {
   sound: boolean;
@@ -13,10 +14,12 @@ interface SettingsPanelProps {
   onSettingsChange: (s: Settings) => void;
 }
 
-const SETTING_ROWS: { key: keyof Settings; label: string; desc: string; icon: string }[] = [
-  { key: "sound",     label: "SOUND FX",     desc: "Ambient audio and UI sound effects",    icon: "♪" },
-  { key: "crt",       label: "CRT EFFECTS",  desc: "Scanlines and screen vignette overlay",  icon: "▦" },
-  { key: "pixelGrid", label: "PIXEL GRID",   desc: "Subtle background grid texture",         icon: "⊞" },
+type IconComponent = React.ComponentType<{ size?: number; color?: string }>;
+
+const SETTING_ROWS: { key: keyof Settings; label: string; desc: string; Icon: IconComponent }[] = [
+  { key: "sound",     label: "SOUND FX",     desc: "Ambient audio and UI sound effects",    Icon: MusicNoteIcon },
+  { key: "crt",       label: "CRT EFFECTS",  desc: "Scanlines and screen vignette overlay",  Icon: MonitorIcon },
+  { key: "pixelGrid", label: "PIXEL GRID",   desc: "Subtle background grid texture",         Icon: GridIcon },
 ];
 
 function PixelToggle({
@@ -165,15 +168,16 @@ export default function SettingsPanel({ settings, onSettingsChange }: SettingsPa
             {/* Icon */}
             <div
               style={{
-                fontSize: 16,
                 color: settings[row.key] ? TOGGLE_COLORS[row.key] : "rgba(255,255,255,0.2)",
                 flexShrink: 0,
                 width: 20,
-                textAlign: "center",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
                 transition: "color 0.15s",
               }}
             >
-              {row.icon}
+              <row.Icon size={14} color={settings[row.key] ? TOGGLE_COLORS[row.key] : "rgba(255,255,255,0.2)"} />
             </div>
 
             {/* Text */}

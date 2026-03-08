@@ -6,8 +6,12 @@
  */
 
 import { v4 as uuidv4 } from "uuid";
-import { safeGenerateJSON } from "@/lib/shared/gemini";
-import { personificationPrompt } from "@/lib/shared/prompts";
+import { safeGenerateJSON, safeGenerateJSONFast } from "@/lib/shared/gemini";
+import {
+  characterDesignPrompt,
+  personificationFromBriefPrompt,
+  personificationPrompt,
+} from "@/lib/shared/prompts";
 import type {
   DetectedObject,
   ObjectCharacter,
@@ -129,6 +133,104 @@ const FALLBACK_ARCHETYPES: Array<{
       soap_opera:    { personality: "overlooked witness to drama", voiceStyle: "rustling indignation",         emotionalState: "unappreciated",  relationshipStance: "has seen EVERYTHING" },
     },
   },
+  // ─── Face body-part archetypes ────────────────────────────────────────────
+  {
+    match: /\bhair\b/i,
+    name: "Voluminé",
+    traits: {
+      dating_sim:       { personality: "vain romantic dreamer",          voiceStyle: "flowing dramatic sighs",              emotionalState: "perpetually windswept",        relationshipStance: "expects to be admired first" },
+      mystery:          { personality: "tangled keeper of secrets",      voiceStyle: "knotted whispers",                    emotionalState: "frizzed with hidden tension",  relationshipStance: "knows more than they let on" },
+      fantasy:          { personality: "ancient crown of elemental power", voiceStyle: "rustling incantations",             emotionalState: "wild and untamed",             relationshipStance: "demands reverence from all" },
+      survival:         { personality: "frazzled territorial guard",     voiceStyle: "split-ended field reports",           emotionalState: "bedraggled but defiant",       relationshipStance: "protects the scalp at all costs" },
+      workplace_drama:  { personality: "status-obsessed perfectionist",  voiceStyle: "passive-aggressive styling critique", emotionalState: "bad hair day energy",          relationshipStance: "judges everyone by their presentation" },
+      soap_opera:       { personality: "dramatic scene-stealer",         voiceStyle: "tossing and flipping revelations",    emotionalState: "perpetually in a wind machine", relationshipStance: "enters every room first, always" },
+    },
+  },
+  {
+    match: /\beyes?\b/i,
+    name: "Iris",
+    traits: {
+      dating_sim:       { personality: "intense soul-gazer",             voiceStyle: "smoldering observations",             emotionalState: "deeply searching",             relationshipStance: "sees right through your defenses" },
+      mystery:          { personality: "omniscient surveillance unit",   voiceStyle: "cold clinical observations",          emotionalState: "always watching",              relationshipStance: "has witnessed everything, says nothing" },
+      fantasy:          { personality: "oracle of ancient true sight",   voiceStyle: "prophetic visions spoken aloud",      emotionalState: "seeing beyond the veil",       relationshipStance: "keeper of what others cannot see" },
+      survival:         { personality: "hypervigilant threat detector",  voiceStyle: "constant threat assessments",         emotionalState: "scanning for danger",          relationshipStance: "trusts no peripheral movement" },
+      workplace_drama:  { personality: "judgmental performance reviewer", voiceStyle: "withering silent evaluations",       emotionalState: "perpetually unimpressed",      relationshipStance: "has noted everything in the quarterly review" },
+      soap_opera:       { personality: "dramatic witness to everything",  voiceStyle: "wide-eyed gasping revelations",      emotionalState: "cannot unsee the betrayal",    relationshipStance: "testifies to all wrongdoings" },
+    },
+  },
+  {
+    match: /\bnose\b/i,
+    name: "Nozomi",
+    traits: {
+      dating_sim:       { personality: "hypersensitive romantic sniffer",  voiceStyle: "sniffing out love",                emotionalState: "sniffing nervously",           relationshipStance: "drawn inexplicably to your scent" },
+      mystery:          { personality: "smell-based detective",            voiceStyle: "following olfactory clues",        emotionalState: "suspicious of strange odors",  relationshipStance: "following a trail only they can sense" },
+      fantasy:          { personality: "ancient scent oracle",             voiceStyle: "pronouncing fates through smell",  emotionalState: "scenting ancient magic",       relationshipStance: "the nose knows truths others deny" },
+      survival:         { personality: "threat-detecting survival sniffer", voiceStyle: "urgent scent warnings",           emotionalState: "detecting danger upwind",      relationshipStance: "follow my lead or perish" },
+      workplace_drama:  { personality: "deeply offended by proximity",     voiceStyle: "sniffs of withering disapproval",  emotionalState: "perpetually poked in others' business", relationshipStance: "all up in everyone's affairs" },
+      soap_opera:       { personality: "scandal bloodhound",               voiceStyle: "sniffing out drama",               emotionalState: "quivering with intrigue",      relationshipStance: "can smell a lie from across the room" },
+    },
+  },
+  {
+    match: /\bmouth\b|\blips?\b/i,
+    name: "Labio",
+    traits: {
+      dating_sim:       { personality: "irresistible sweet-talker",       voiceStyle: "honey-dripped confessions",          emotionalState: "pursed with anticipation",     relationshipStance: "everything is a kiss away" },
+      mystery:          { personality: "leaky vault of secrets",          voiceStyle: "mumbled half-truths and slips",      emotionalState: "barely containing it all",     relationshipStance: "knows too much, says too much" },
+      fantasy:          { personality: "ancient spell-casting conduit",   voiceStyle: "incantation power-words",            emotionalState: "crackling with unspoken syllables", relationshipStance: "words have power — choose carefully" },
+      survival:         { personality: "loud danger-caller",              voiceStyle: "screamed field warnings",            emotionalState: "ready to bite or scream",      relationshipStance: "first line of defense and offense" },
+      workplace_drama:  { personality: "meeting monopolizer",             voiceStyle: "never-ending presentations",         emotionalState: "has more to say, always",      relationshipStance: "guaranteed last word in every discussion" },
+      soap_opera:       { personality: "compulsive gossip catastrophist", voiceStyle: "breathless bombshell deliveries",    emotionalState: "unable to stop talking",       relationshipStance: "spills everything, always, immediately" },
+    },
+  },
+  {
+    match: /\beyebrows?\b/i,
+    name: "Archibrow",
+    traits: {
+      dating_sim:       { personality: "expressive emotional antenna",    voiceStyle: "arched innuendo and flirtatious lifts", emotionalState: "raised in intrigue",        relationshipStance: "one raise says more than a speech" },
+      mystery:          { personality: "suspicion incarnate",             voiceStyle: "furrowed accusations",               emotionalState: "deeply skeptical of all claims", relationshipStance: "questions everyone, always" },
+      fantasy:          { personality: "ancient expression sigil",        voiceStyle: "powerful arched judgments",          emotionalState: "furrowed with ancient wisdom", relationshipStance: "the arch of doom has spoken" },
+      survival:         { personality: "threat-expression broadcaster",   voiceStyle: "fierce nonverbal warnings",          emotionalState: "locked in permanent battle mode", relationshipStance: "the face's earliest warning system" },
+      workplace_drama:  { personality: "master of disapproval",          voiceStyle: "single devastating raised brow",      emotionalState: "perpetually unconvinced",      relationshipStance: "micromanages all facial policy" },
+      soap_opera:       { personality: "overdramatic reactor",            voiceStyle: "sky-high arches of disbelief",       emotionalState: "theatrical shock and outrage",  relationshipStance: "leads every dramatic reaction shot" },
+    },
+  },
+  {
+    match: /\bears?\b/i,
+    name: "Aurie",
+    traits: {
+      dating_sim:       { personality: "devoted eager listener",          voiceStyle: "whispered attentive devotion",       emotionalState: "hanging on every word",        relationshipStance: "hears everything you say, and everything you don't" },
+      mystery:          { personality: "covert intelligence collector",   voiceStyle: "intercepted reports",                emotionalState: "picking up all frequencies",   relationshipStance: "has been listening the entire time" },
+      fantasy:          { personality: "ancient sound conduit",           voiceStyle: "channeling distant whispers",        emotionalState: "tuned to otherworldly frequencies", relationshipStance: "hears what others cannot" },
+      survival:         { personality: "threat sonar unit",               voiceStyle: "parsed sound threat analysis",       emotionalState: "tracking every footstep",      relationshipStance: "hears danger long before you see it" },
+      workplace_drama:  { personality: "professional eavesdropper",       voiceStyle: "pretending not to listen",           emotionalState: "absorbing every word",         relationshipStance: "knows every corridor conversation" },
+      soap_opera:       { personality: "legendary gossip collector",      voiceStyle: "just happened to overhear",          emotionalState: "perpetually eavesdropping",    relationshipStance: "has all the receipts, all of them" },
+    },
+  },
+  {
+    match: /\bforehead\b/i,
+    name: "Frontus",
+    traits: {
+      dating_sim:       { personality: "overthinking romantic philosopher", voiceStyle: "ponderous love declarations",       emotionalState: "deeply creased with longing",  relationshipStance: "thinks about you constantly" },
+      mystery:          { personality: "stress-line archivist",            voiceStyle: "reading tension like a text",        emotionalState: "furrowed with unsolved puzzles", relationshipStance: "every wrinkle tells a story" },
+      fantasy:          { personality: "third-eye battleground",           voiceStyle: "pronouncing mystical truths",        emotionalState: "vibrating with latent power",  relationshipStance: "the seat of all hidden knowledge" },
+      survival:         { personality: "battle-scarred veteran",           voiceStyle: "grim experience-hardened commands",  emotionalState: "scarred but unbroken",         relationshipStance: "has survived worse than you" },
+      workplace_drama:  { personality: "anxiety storage facility",         voiceStyle: "stress-compressed observations",     emotionalState: "holding every deadline in creases", relationshipStance: "visibly struggling but won't admit it" },
+      soap_opera:       { personality: "dramatic brow-clutcher",           voiceStyle: "clutching and gasping",              emotionalState: "perpetually overwhelmed",      relationshipStance: "every crisis lands here first" },
+    },
+  },
+  {
+    match: /\bchin\b|\bjaw\b/i,
+    name: "Mandicus",
+    traits: {
+      dating_sim:       { personality: "stoic strong-jawed romantic",     voiceStyle: "clenched emotional restraint",       emotionalState: "holding feelings inside",      relationshipStance: "more feeling than they show" },
+      mystery:          { personality: "determined interrogator",          voiceStyle: "jutting out for answers",            emotionalState: "set with grim resolve",        relationshipStance: "will not rest until the truth is out" },
+      fantasy:          { personality: "legendary iron will",              voiceStyle: "unyielding proclamations",           emotionalState: "resolute and ancient",         relationshipStance: "the chin of destiny cannot be denied" },
+      survival:         { personality: "unbreakable stubborn survivor",    voiceStyle: "clenched single-sentence commands",  emotionalState: "defiant no matter what",       relationshipStance: "has taken hits and keeps coming" },
+      workplace_drama:  { personality: "power-pose authority",             voiceStyle: "delivered from a raised platform",   emotionalState: "projecting dominance",         relationshipStance: "this chin runs the meeting" },
+      soap_opera:       { personality: "dramatic jutting defiance",        voiceStyle: "chin raised through every betrayal",  emotionalState: "nobly suffering",             relationshipStance: "faces every scandal head-on, literally" },
+    },
+  },
+  // ─── End face body-part archetypes ────────────────────────────────────────
   {
     match: /door|window/i,
     name: "Portia",
@@ -253,12 +355,6 @@ export const personification: IPersonification = {
     existingCharacters: ObjectCharacter[]
   ): Promise<ObjectCharacter> {
     const existingNames = existingCharacters.map((c) => c.name);
-    const prompt = personificationPrompt(
-      object.label,
-      object.context,
-      genre,
-      existingNames
-    );
 
     interface PersonifyResult {
       name: string;
@@ -269,7 +365,49 @@ export const personification: IPersonification = {
       relationshipStance: string;
     }
 
-    const result = await safeGenerateJSON<PersonifyResult>(prompt);
+    // ── Step 1: Gemini 2.5-flash generates a rich character design brief ──────
+    const briefPrompt = characterDesignPrompt(
+      object.label,
+      object.context ?? "",
+      genre,
+      existingCharacters.map((c) => ({
+        name: c.name,
+        objectLabel: c.objectLabel,
+        personality: c.personality,
+      }))
+    );
+
+    const brief = await safeGenerateJSON<{ brief: string } | string>(briefPrompt);
+
+    // ── Step 2: Gemini 2.0-flash converts the brief into final character JSON ─
+    let result: PersonifyResult | null = null;
+
+    if (brief) {
+      // The brief may come back as a plain string or wrapped in an object
+      const briefText =
+        typeof brief === "string"
+          ? brief
+          : (brief as { brief?: string }).brief ?? JSON.stringify(brief);
+
+      const characterPrompt = personificationFromBriefPrompt(
+        object.label,
+        briefText,
+        existingNames
+      );
+
+      result = await safeGenerateJSONFast<PersonifyResult>(characterPrompt);
+    }
+
+    // ── Fallback: if either step failed, use the single-shot prompt ───────────
+    if (!result) {
+      const fallbackPrompt = personificationPrompt(
+        object.label,
+        object.context ?? "",
+        genre,
+        existingNames
+      );
+      result = await safeGenerateJSON<PersonifyResult>(fallbackPrompt);
+    }
 
     if (!result) return fallbackCharacter(object, genre);
 

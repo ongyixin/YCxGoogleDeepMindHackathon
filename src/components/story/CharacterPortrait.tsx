@@ -89,7 +89,7 @@ export function CharacterPortrait({
     <div className={cn("flex flex-col items-center gap-1", className)}>
       <div
         className={cn(
-          "relative rounded-2xl border overflow-hidden shrink-0",
+          "relative rounded-2xl border overflow-hidden shrink-0 bg-white",
           sizeConf.container,
           stanceBorder
         )}
@@ -99,7 +99,7 @@ export function CharacterPortrait({
           <img
             src={character.portrait}
             alt={character.name}
-            className="w-full h-full object-cover"
+            className="w-full h-full object-contain"
           />
         ) : (
           /* Stylized fallback */

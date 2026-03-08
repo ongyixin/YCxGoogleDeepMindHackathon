@@ -1,5 +1,5 @@
 /**
- * Gemini 2.0 Flash wrapper.
+ * Gemini 2.5 Flash wrapper.
  * All AI calls funnel through here so fallback logic lives in one place.
  * Server-side only — never import this from client components.
  */
@@ -22,7 +22,7 @@ function getModel() {
 }
 
 function getFlashLiteModel() {
-  return getGenAI().getGenerativeModel({ model: "gemini-2.0-flash-lite" });
+  return getGenAI().getGenerativeModel({ model: "gemini-2.5-flash-lite" });
 }
 
 /** Generate structured JSON from a text prompt. Throws on API failure. */
@@ -73,10 +73,14 @@ export async function generateText(prompt: string): Promise<string> {
  * Callers should implement fallback behavior when null is returned.
  */
 export async function safeGenerateJSON<T>(prompt: string): Promise<T | null> {
-  if (!isApiAvailable.gemini()) return null;
+  if (!isApiAvailable.gemini()) {
+    console.warn("[Gemini] safeGenerateJSON: API key not configured");
+    return null;
+  }
   try {
     return await generateJSON<T>(prompt);
-  } catch {
+  } catch (err) {
+    console.error("[Gemini] safeGenerateJSON failed:", err);
     return null;
   }
 }
@@ -86,15 +90,20 @@ export async function safeGenerateJSON<T>(prompt: string): Promise<T | null> {
  * Use for latency-sensitive calls like character dialogue where speed > capability.
  */
 export async function safeGenerateJSONFast<T>(prompt: string): Promise<T | null> {
-  if (!isApiAvailable.gemini()) return null;
+  if (!isApiAvailable.gemini()) {
+    console.warn("[Gemini] safeGenerateJSONFast: API key not configured");
+    return null;
+  }
   try {
     const model = getFlashLiteModel();
     const result = await model.generateContent({
       contents: [{ role: "user", parts: [{ text: prompt }] }],
       generationConfig: { responseMimeType: "application/json" },
     });
-    return JSON.parse(result.response.text()) as T;
-  } catch {
+    const raw = result.response.text();
+    return JSON.parse(raw) as T;
+  } catch (err) {
+    console.error("[Gemini] safeGenerateJSONFast failed:", err);
     return null;
   }
 }
@@ -104,10 +113,14 @@ export async function safeAnalyzeImageJSON<T>(
   base64Image: string,
   prompt: string
 ): Promise<T | null> {
-  if (!isApiAvailable.gemini()) return null;
+  if (!isApiAvailable.gemini()) {
+    console.warn("[Gemini] safeAnalyzeImageJSON: API key not configured");
+    return null;
+  }
   try {
     return await analyzeImageJSON<T>(base64Image, prompt);
-  } catch {
+  } catch (err) {
+    console.error("[Gemini] safeAnalyzeImageJSON failed:", err);
     return null;
   }
 }
@@ -116,10 +129,14 @@ export async function safeAnalyzeImageJSON<T>(
 export async function safeGenerateText(
   prompt: string
 ): Promise<string | null> {
-  if (!isApiAvailable.gemini()) return null;
+  if (!isApiAvailable.gemini()) {
+    console.warn("[Gemini] safeGenerateText: API key not configured");
+    return null;
+  }
   try {
     return await generateText(prompt);
-  } catch {
+  } catch (err) {
+    console.error("[Gemini] safeGenerateText failed:", err);
     return null;
   }
 }

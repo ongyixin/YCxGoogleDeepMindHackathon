@@ -77,6 +77,85 @@ Which real-world tasks or missions would naturally happen here?`;
 // Story Mode prompts
 // ---------------------------------------------------------------------------
 
+/**
+ * Step 1 of two-step character creation.
+ * Gemini 2.5-flash uses this to produce a rich character design brief
+ * that Step 2 (Flash Lite) will convert into final character stats.
+ */
+export function characterDesignPrompt(
+  objectLabel: string,
+  objectContext: string,
+  genre: StoryGenre,
+  existingCharacters: Array<{ name: string; objectLabel: string; personality: string }>
+): string {
+  const genreGuides: Record<StoryGenre, string> = {
+    dating_sim:       "romantic tension, longing, jealousy, emotional vulnerability",
+    mystery:          "secrets, suspicion, cryptic knowledge, hidden agendas",
+    fantasy:          "ancient power, magical grudges, elemental alignments, prophecies",
+    survival:         "desperation, territorial, resource hoarding, unlikely alliances",
+    workplace_drama:  "professional jealousy, ambition, passive aggression, office politics",
+    soap_opera:       "betrayal, secret relationships, dramatic reveals, overblown emotions",
+  };
+
+  const existingList = existingCharacters.length > 0
+    ? existingCharacters.map((c) => `- ${c.name} (${c.objectLabel}): ${c.personality}`).join("\n")
+    : "none yet";
+
+  return `You are a creative director designing a character for a ${genre.replace("_", " ")} game.
+
+OBJECT TO PERSONIFY: "${objectLabel}"
+VISUAL/PHYSICAL CONTEXT: ${objectContext}
+GENRE TONE: ${genreGuides[genre]}
+
+EXISTING CHARACTERS — do NOT create something that duplicates these:
+${existingList}
+
+Write a DETAILED CHARACTER DESIGN BRIEF (3–5 paragraphs) covering:
+
+1. OBJECT IDENTITY — How does this object's real-world function, material, and appearance directly shape who this character IS? Be specific. A "broken lamp" and a "brand-new floor lamp" should yield very different characters.
+
+2. GENRE FIT — Apply the ${genre.replace("_", " ")} lens hard. Give this character a specific dramatic role, desire, and secret that fits the genre. Not generic — commit to the bit.
+
+3. VOICE & SPEECH — Exactly how do they talk? Speed, vocabulary, emotional leakage, verbal tics. Include 2 example phrases they would actually say.
+
+4. EMOTIONAL CORE — What do they desperately want right now? What are they hiding? How do they react to the player approaching them for the first time?
+
+5. NAME — Suggest a single distinctive name that could ONLY belong to a personified "${objectLabel}". Must not clash with: ${existingCharacters.map((c) => c.name).join(", ") || "none"}.
+
+Be vivid, specific, and funny-or-dramatic depending on genre. This brief goes directly to a character generator.`;
+}
+
+/**
+ * Step 2 of two-step character creation.
+ * Flash Lite uses the design brief from Step 1 to produce the final character JSON.
+ */
+export function personificationFromBriefPrompt(
+  objectLabel: string,
+  characterBrief: string,
+  existingCharacterNames: string[]
+): string {
+  return `You are generating character stats for a ${objectLabel} personification game character.
+
+CHARACTER DESIGN BRIEF:
+---
+${characterBrief}
+---
+
+Names already in use (pick something different): ${existingCharacterNames.join(", ") || "none"}
+
+Convert the brief above into this exact JSON shape:
+{
+  "name": string,              // single distinctive name — must not duplicate taken names
+  "personality": string,       // 2-4 word archetype e.g. "jealous poet", "passive-aggressive oracle"
+  "voiceStyle": string,        // how they speak e.g. "dramatic whisper", "corporate doublespeak"
+  "emotionalState": string,    // current feeling e.g. "brooding", "desperate", "smug"
+  "relationshipToUser": 0,     // always 0
+  "relationshipStance": string // initial attitude e.g. "cautiously interested", "deeply suspicious"
+}
+
+Stay true to the brief. The character MUST feel like a personified "${objectLabel}".`;
+}
+
 export function personificationPrompt(
   objectLabel: string,
   objectContext: string,
@@ -131,7 +210,8 @@ export function dialoguePrompt(
   interactionMode: InteractionMode,
   userMessage: string,
   nearbyCharacters: string,
-  genre: StoryGenre
+  genre: StoryGenre,
+  gestureContext?: { gesture: string; confidence: number } | null
 ): string {
   const modeInstructions: Record<InteractionMode, string> = {
     flirt: "The user is flirting. React with appropriate genre-specific romantic tension.",
@@ -155,13 +235,30 @@ export function dialoguePrompt(
       ? "guarded and suspicious"
       : "hostile — this relationship is damaged";
 
+  // Human-readable descriptions of what each gesture conveys so the character
+  // can respond naturally rather than reciting a raw label.
+  const GESTURE_DESCRIPTIONS: Record<string, string> = {
+    thumbs_up:   "a thumbs-up (approval, enthusiasm, 'yes!')",
+    thumbs_down: "a thumbs-down (disapproval, rejection, 'no')",
+    victory:     "a peace / victory sign (playful, confident)",
+    open_palm:   "an open palm (hello, stop, openness)",
+    closed_fist: "a raised fist (challenge, power, defiance)",
+    pointing:    "pointing with one finger (directing attention at something)",
+    i_love_you:  "the 'I love you' sign — pinky, index, and thumb extended (affection)",
+  };
+
+  const gestureSection =
+    gestureContext && gestureContext.gesture !== "none"
+      ? `\nPhysical gesture: The user is showing ${GESTURE_DESCRIPTIONS[gestureContext.gesture] ?? `a "${gestureContext.gesture}" gesture`} (confidence ${Math.round(gestureContext.confidence * 100)}%). You can physically SEE this gesture. Acknowledge or react to it naturally — it is part of this interaction.`
+      : "";
+
   return `You are ${characterName}, a ${personality} in a ${genre.replace("_", " ")} game. 
 Voice style: ${voiceStyle}
 Current emotional state: ${emotionalState}
 Relationship with user (${relationshipToUser}/100): ${relationshipDesc}
 Nearby characters: ${nearbyCharacters || "none"}
 Your memories: ${memories.length > 0 ? memories.join(" | ") : "no history yet"}
-
+${gestureSection}
 Interaction mode: ${interactionMode.toUpperCase()}
 ${modeInstructions[interactionMode]}
 
@@ -373,6 +470,53 @@ export const CATEGORY_TO_MOOD: Record<MissionCategory, string> = {
   recon: "suspenseful",
   endurance: "driving",
 };
+
+// ---------------------------------------------------------------------------
+// Face body part analysis prompt (triggered when a face/person is detected)
+// ---------------------------------------------------------------------------
+
+/**
+ * Ask Gemini to decompose a visible face into individual body parts,
+ * each described richly enough to be personified as a character.
+ */
+export function facePartAnalysisPrompt(genre?: StoryGenre): string {
+  const genreLens: Partial<Record<StoryGenre, string>> = {
+    dating_sim:       "romantic tension — focus on what makes each feature alluring, vulnerable, or dangerously attractive",
+    mystery:          "secrets and suspicion — each feature hides something or gives something away",
+    fantasy:          "magical traits — features have elemental or mystical qualities",
+    survival:         "raw survival signals — stress, resilience, threat-readiness",
+    workplace_drama:  "professional self-presentation — status, insecurity, ambition",
+    soap_opera:       "scandalous drama potential — over-the-top expressiveness, secrets written on the face",
+  };
+  const lens = genre ? genreLens[genre] : null;
+
+  return `A human face is visible in this camera frame. Your job is to identify and vividly describe each distinct facial feature so it can be turned into a dramatic comedy character.
+
+Return a JSON object with this exact shape:
+{
+  "faceBodyParts": [
+    {
+      "id": string,       // slug, e.g. "hair_1", "eyes_1", "nose_1"
+      "label": string,    // one of: "hair", "eyes", "nose", "mouth", "eyebrows", "ears", "forehead", "chin"
+      "salience": number, // 0.70–0.95 — all face parts are prominent
+      "position": "left" | "center" | "right" | "background",
+      "context": string   // VIVID physical description: color, texture, shape, expression, condition
+    }
+  ]
+}
+
+Include 4–6 of the most visually distinctive features. Focus on:
+- Hair (exact color, texture, length, style — messy? perfect? thinning? glorious?)
+- Eyes (color, shape, expression — tired? intense? suspicious? dreamy?)
+- Nose (shape, size, any standout feature)
+- Mouth / lips (expression, fullness, color — smirk? pout? grim? cheeky?)
+- Eyebrows (thick? thin? arched? furrowed? one higher than the other?)
+- Ears (if visible — small, prominent, earrings?)
+
+Make context descriptions VIVID and comedically usable — e.g. "unkempt curly auburn hair that clearly makes its own decisions" or "sharp brown eyes conveying deeply personal offense at everything".
+${lens ? `\nGenre lens: ${lens}` : ""}
+Order by how distinctive/prominent the feature is (most standout first). All salience values ≥ 0.70. All positions "center" unless clearly off-center.`;
+}
 
 // ---------------------------------------------------------------------------
 // Backward-compat aliases (consumed by narrator.ts and other shared modules)

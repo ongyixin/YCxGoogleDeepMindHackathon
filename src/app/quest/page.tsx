@@ -1,14 +1,15 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { QuestHUD } from "@/components/quest/QuestHUD";
 import { MissionBriefing } from "@/components/quest/MissionBriefing";
 import { ActiveMission } from "@/components/quest/ActiveMission";
+import { ObjectiveGallery } from "@/components/quest/ObjectiveGallery";
 import TaskInput from "@/components/quest/TaskInput";
 import { MomentumMeter } from "@/components/quest/MomentumMeter";
 import NarrationBanner from "@/components/shared/NarrationBanner";
 import { MusicIndicator } from "@/components/shared/MusicIndicator";
-import { Camera } from "@/components/shared/Camera";
+import { Camera, type CameraHandle } from "@/components/shared/Camera";
 import { MOCK_QUEST_SESSION } from "@/lib/mock-data";
 import { DEMO_MODE } from "@/lib/constants";
 import type {
@@ -20,9 +21,72 @@ import type {
   ProgressRequest,
   ProgressResponse,
   MusicResponse,
+  ObjectiveSnapshot,
 } from "@/types";
 
 type UIPhase = "input" | "briefing" | "active" | "done";
+
+// ─── Quest Log persistence ─────────────────────────────────────────────────────
+
+const QUEST_LOG_KEY = "mcm_quest_log";
+const DEBRIEF_SNAPSHOTS_KEY = "mcm_debrief_snapshots";
+const MAX_LOG_ENTRIES = 20;
+
+interface StoredMission {
+  id: string;
+  codename: string;
+  originalTask: string;
+  category: string;
+  status: string;
+  xpReward: number;
+  objectives: Array<{ description: string; completed: boolean }>;
+  completedAt?: number;
+}
+
+export interface StoredQuestSession {
+  sessionId: string;
+  startedAt: number;
+  savedAt: number;
+  missions: StoredMission[];
+  totalXP: number;
+  completedCount: number;
+}
+
+function persistQuestSession(session: SessionState): void {
+  if (!session.questState || session.questState.missions.length === 0) return;
+  try {
+    const missions: StoredMission[] = session.questState.missions.map((m) => ({
+      id: m.id,
+      codename: m.codename,
+      originalTask: m.originalTask,
+      category: m.category,
+      status: m.status,
+      xpReward: m.xpReward,
+      objectives: m.objectives.map((o) => ({
+        description: o.description,
+        completed: o.completed,
+      })),
+      completedAt: m.completedAt,
+    }));
+    const entry: StoredQuestSession = {
+      sessionId: session.id,
+      startedAt: session.startedAt,
+      savedAt: Date.now(),
+      missions,
+      totalXP: session.progression.xp,
+      completedCount: missions.filter((m) => m.status === "completed").length,
+    };
+    const raw = localStorage.getItem(QUEST_LOG_KEY);
+    const log: StoredQuestSession[] = raw ? JSON.parse(raw) : [];
+    const idx = log.findIndex((e) => e.sessionId === entry.sessionId);
+    if (idx >= 0) {
+      log[idx] = entry;
+    } else {
+      log.unshift(entry);
+    }
+    localStorage.setItem(QUEST_LOG_KEY, JSON.stringify(log.slice(0, MAX_LOG_ENTRIES)));
+  } catch { /* silent */ }
+}
 
 /**
  * Quest Mode page shell — tactical pixel-retro overlay.
@@ -45,6 +109,9 @@ export default function QuestPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [musicState, setMusicState] = useState<MusicResponse | null>(null);
   const [audioEnabled, setAudioEnabled] = useState(false);
+  const [objectiveSnapshots, setObjectiveSnapshots] = useState<ObjectiveSnapshot[]>([]);
+  const [showGallery, setShowGallery] = useState(false);
+  const cameraRef = useRef<CameraHandle>(null);
 
   // ── Session initialization ──────────────────────────────────────────────────
   useEffect(() => {
@@ -138,6 +205,21 @@ export default function QuestPage() {
     window.addEventListener("pointerdown", unlockAudio, { once: true });
     return () => window.removeEventListener("pointerdown", unlockAudio);
   }, []);
+
+  // Persist session to quest log whenever missions change
+  useEffect(() => {
+    if (!session?.questState || session.questState.missions.length === 0) return;
+    persistQuestSession(session);
+  }, [session]);
+
+  // Persist snapshots to sessionStorage when mission completes so recap page can read them
+  useEffect(() => {
+    if (phase === "done" && objectiveSnapshots.length > 0) {
+      try {
+        sessionStorage.setItem(DEBRIEF_SNAPSHOTS_KEY, JSON.stringify(objectiveSnapshots));
+      } catch { /* silent — quota exceeded */ }
+    }
+  }, [phase, objectiveSnapshots]);
 
   // ── Derive quest state ──────────────────────────────────────────────────────
   const questState = session?.questState ?? null;
@@ -314,6 +396,52 @@ export default function QuestPage() {
     setPhase("input");
   }, [sessionId, fetchMusic]);
 
+  // ── Objective complete (snapshot + local state) ─────────────────────────────
+  const handleObjectiveComplete = useCallback((missionId: string, objectiveId: string) => {
+    // Find the objective description from current session state
+    const mission = session?.questState?.missions.find((m) => m.id === missionId);
+    const objective = mission?.objectives.find((o) => o.id === objectiveId);
+    if (!objective || objective.completed) return;
+
+    // Capture snapshot from live camera feed
+    const base64 = cameraRef.current?.captureFrame() ?? null;
+    const dataUrl = base64 ? `data:image/jpeg;base64,${base64}` : "";
+
+    if (dataUrl) {
+      setObjectiveSnapshots((prev) => [
+        ...prev,
+        {
+          objectiveId,
+          missionId,
+          objectiveDescription: objective.description,
+          dataUrl,
+          capturedAt: Date.now(),
+        },
+      ]);
+    }
+
+    // Mark objective completed in local session state
+    setSession((prev) => {
+      if (!prev?.questState) return prev;
+      return {
+        ...prev,
+        questState: {
+          ...prev.questState,
+          missions: prev.questState.missions.map((m) =>
+            m.id !== missionId
+              ? m
+              : {
+                  ...m,
+                  objectives: m.objectives.map((o) =>
+                    o.id !== objectiveId ? o : { ...o, completed: true }
+                  ),
+                }
+          ),
+        },
+      };
+    });
+  }, [session]);
+
   // ── Loading state ───────────────────────────────────────────────────────────
   if (initLoading || !session || !questState) {
     return (
@@ -344,7 +472,7 @@ export default function QuestPage() {
     >
       {/* Layer 0: Camera feed */}
       <div className="absolute inset-0 z-0">
-        <Camera className="w-full h-full object-cover opacity-25" mode="quest" />
+        <Camera ref={cameraRef} className="w-full h-full object-cover opacity-25" mode="quest" />
       </div>
 
       {/* Layer 1: Tactical dark overlay */}
@@ -439,8 +567,11 @@ export default function QuestPage() {
             mission={activeMission}
             momentum={questState.momentum}
             latestNarration={latestNarration ?? undefined}
+            snapshots={objectiveSnapshots.filter((s) => s.missionId === activeMission.id)}
             onComplete={handleComplete}
             onAbandon={handleAbandon}
+            onObjectiveComplete={handleObjectiveComplete}
+            onOpenGallery={() => setShowGallery(true)}
           />
         )}
 
@@ -497,6 +628,15 @@ export default function QuestPage() {
 
       {/* Pixel corner brackets */}
       <TacticalCorners />
+
+      {/* Objective Gallery overlay */}
+      {showGallery && activeMission && (
+        <ObjectiveGallery
+          snapshots={objectiveSnapshots.filter((s) => s.missionId === activeMission.id)}
+          missionCodename={activeMission.codename}
+          onClose={() => setShowGallery(false)}
+        />
+      )}
     </div>
   );
 }

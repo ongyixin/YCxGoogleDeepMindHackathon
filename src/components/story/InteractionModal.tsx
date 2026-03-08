@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/lib/cn";
 import { RelationshipBar } from "./RelationshipBar";
+import { useVoiceAgent, type VoiceState } from "@/hooks/useVoiceAgent";
 import type { ObjectCharacter, InteractionMode } from "@/types";
 
 async function fetchSuggestion(
@@ -40,6 +41,7 @@ interface InteractionModalProps {
   lastResult?: TalkResult | null;
   isOpen?: boolean;
   onSend?: (character: ObjectCharacter, mode: InteractionMode, message: string) => Promise<void>;
+  onSave?: (character: ObjectCharacter) => void;
   response?: string;
   relationshipDelta?: number;
 }
@@ -96,14 +98,14 @@ function CharacterSprite({
 
   return (
     <div
-      className="relative shrink-0 overflow-hidden border border-[#FFDE00]/50"
+      className="relative shrink-0 overflow-hidden border border-[#FFDE00]/50 bg-white"
       style={{ width: 60, height: 60, borderRadius: 5 }}
     >
       {character.portraitUrl ? (
         <img
           src={character.portraitUrl}
           alt={character.name}
-          className="w-full h-full object-cover"
+          className="w-full h-full object-contain"
         />
       ) : (
         <div className={cn("absolute inset-0 flex flex-col items-center justify-center bg-gradient-to-br", gradient)}>
@@ -142,7 +144,6 @@ function CharacterStageImage({
     >
       {character.portraitUrl ? (
         <>
-          {/* Dark stage backdrop so transparent PNGs pop */}
           <div
             className="absolute inset-0 rounded-xl"
             style={{ background: "radial-gradient(ellipse at 50% 90%, rgba(204,0,0,0.18) 0%, rgba(6,4,14,0) 70%)" }}
@@ -152,12 +153,10 @@ function CharacterStageImage({
             alt={character.name}
             className="absolute inset-0 w-full h-full object-contain"
             style={{
-              // multiply blends white areas into the dark background, removing any non-transparent white fill
               mixBlendMode: "multiply",
               filter: "drop-shadow(0 8px 24px rgba(255,222,0,0.18)) drop-shadow(0 2px 8px rgba(0,0,0,0.8))",
             }}
           />
-          {/* Ground glow beneath feet */}
           <div className="absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-[rgba(204,0,0,0.22)] to-transparent pointer-events-none rounded-b-xl" />
         </>
       ) : (
@@ -197,6 +196,173 @@ function TypewriterText({ text, className }: { text: string; className?: string 
   );
 }
 
+// ─── Voice mode components ────────────────────────────────────────────────────
+
+/** Animated waveform bars — used for both listening and speaking states. */
+function VoiceWaveform({ active, color = "#FFDE00", bars = 7 }: { active: boolean; color?: string; bars?: number }) {
+  return (
+    <div className="flex items-center gap-[3px]" aria-hidden>
+      {Array.from({ length: bars }).map((_, i) => (
+        <motion.div
+          key={i}
+          style={{ width: 3, background: color, borderRadius: 2 }}
+          animate={active ? {
+            height: ["4px", `${10 + Math.sin(i * 1.3) * 8}px`, "4px"],
+            opacity: [0.6, 1, 0.6],
+          } : { height: "3px", opacity: 0.3 }}
+          transition={active ? {
+            duration: 0.55 + i * 0.06,
+            repeat: Infinity,
+            ease: "easeInOut",
+            delay: i * 0.07,
+          } : { duration: 0.2 }}
+        />
+      ))}
+    </div>
+  );
+}
+
+/** Pulsing ring around the mic button when listening. */
+function ListeningRing() {
+  return (
+    <>
+      {[1, 2, 3].map((i) => (
+        <motion.div
+          key={i}
+          className="absolute inset-0 rounded-full border-2"
+          style={{ borderColor: "rgba(204,0,0,0.6)" }}
+          initial={{ scale: 1, opacity: 0.7 }}
+          animate={{ scale: 1 + i * 0.35, opacity: 0 }}
+          transition={{ duration: 1.4, delay: i * 0.35, repeat: Infinity, ease: "easeOut" }}
+        />
+      ))}
+    </>
+  );
+}
+
+/** The voice input/status bar shown instead of the text input in voice mode. */
+function VoiceBar({
+  voiceState,
+  lastTranscript,
+  characterName,
+  onMicPress,
+  onMicRelease,
+  onCancel,
+  isSpeechSupported,
+}: {
+  voiceState: VoiceState;
+  lastTranscript: string;
+  characterName: string;
+  onMicPress: () => void;
+  onMicRelease: () => void;
+  onCancel: () => void;
+  isSpeechSupported: boolean;
+}) {
+  const isListening = voiceState === "listening";
+  const isSpeaking = voiceState === "speaking";
+  const isProcessing = voiceState === "processing";
+  const isIdle = voiceState === "idle";
+
+  const statusMap: Record<VoiceState, { label: string; color: string }> = {
+    idle:       { label: "TAP TO SPEAK",   color: "rgba(255,222,0,0.5)"  },
+    listening:  { label: "LISTENING...",   color: "#FF4444"              },
+    processing: { label: "PROCESSING...",  color: "rgba(255,222,0,0.7)"  },
+    speaking:   { label: `${characterName.toUpperCase()} SPEAKING`, color: "#FFDE00" },
+  };
+  const { label, color } = statusMap[voiceState];
+
+  return (
+    <div
+      className="flex items-center gap-2 px-2 py-2"
+      style={{
+        border: `2px solid ${isListening ? "#CC0000" : isIdle ? "rgba(255,222,0,0.3)" : "rgba(255,222,0,0.6)"}`,
+        background: isListening ? "rgba(204,0,0,0.1)" : "rgba(6,4,14,0.9)",
+        transition: "border-color 0.2s, background 0.2s",
+      }}
+    >
+      {/* Mic / status button */}
+      <div className="relative flex shrink-0">
+        {isListening && <ListeningRing />}
+        <motion.button
+          onPointerDown={isIdle ? onMicPress : undefined}
+          onPointerUp={isListening ? onMicRelease : undefined}
+          onPointerLeave={isListening ? onMicRelease : undefined}
+          onClick={isSpeaking ? onCancel : undefined}
+          disabled={!isSpeechSupported || isProcessing}
+          className="relative z-10 flex items-center justify-center rounded-full"
+          style={{
+            width: 40,
+            height: 40,
+            background: isListening
+              ? "#CC0000"
+              : isSpeaking
+              ? "rgba(255,222,0,0.15)"
+              : "rgba(204,0,0,0.2)",
+            border: `2px solid ${isListening ? "#FF4444" : isSpeaking ? "#FFDE00" : "rgba(204,0,0,0.6)"}`,
+            boxShadow: isListening ? "0 0 16px rgba(204,0,0,0.6)" : "none",
+            transition: "all 0.15s",
+          }}
+          whileTap={isIdle ? { scale: 0.88 } : {}}
+          aria-label={isListening ? "Listening — release to stop" : isSpeaking ? "Tap to interrupt" : "Hold to speak"}
+        >
+          {isSpeaking ? (
+            <span style={{ fontSize: 18, lineHeight: 1 }}>🔊</span>
+          ) : isProcessing ? (
+            <motion.span
+              style={{ fontSize: 14, color: "#FFDE00" }}
+              animate={{ opacity: [0.3, 1, 0.3] }}
+              transition={{ duration: 0.6, repeat: Infinity }}
+            >
+              ◌
+            </motion.span>
+          ) : (
+            <span style={{ fontSize: 18, lineHeight: 1 }}>🎙</span>
+          )}
+        </motion.button>
+      </div>
+
+      {/* Status text + waveform */}
+      <div className="flex-1 min-w-0 flex items-center gap-2 overflow-hidden">
+        <span
+          className="font-pixel text-[10px] shrink-0 leading-none"
+          style={{ color }}
+        >
+          {label}
+        </span>
+        {(isListening || isSpeaking) && (
+          <VoiceWaveform
+            active
+            color={isListening ? "#FF4444" : "#FFDE00"}
+          />
+        )}
+        {isProcessing && lastTranscript && (
+          <span
+            className="font-vt text-xs truncate italic"
+            style={{ color: "rgba(255,240,176,0.6)" }}
+          >
+            "{lastTranscript}"
+          </span>
+        )}
+      </div>
+
+      {/* Interrupt hint for speaking */}
+      {isSpeaking && (
+        <button
+          onClick={onCancel}
+          className="font-pixel text-[9px] shrink-0 px-1.5 py-0.5"
+          style={{
+            color: "rgba(255,222,0,0.5)",
+            border: "1px solid rgba(255,222,0,0.2)",
+            background: "rgba(0,0,0,0.3)",
+          }}
+        >
+          ✕ SKIP
+        </button>
+      )}
+    </div>
+  );
+}
+
 export function InteractionModal({
   character,
   onClose,
@@ -205,6 +371,7 @@ export function InteractionModal({
   lastResult,
   isOpen = true,
   onSend,
+  onSave,
   response: externalResponse,
   relationshipDelta: externalDelta,
 }: InteractionModalProps) {
@@ -223,23 +390,46 @@ export function InteractionModal({
       newRelationshipToUser: character.relationshipToUser + (externalDelta ?? 0),
     } : null);
 
-  const [selectedMode, setSelectedMode] = useState<InteractionMode>("befriend");
+  const [selectedMode, setSelectedMode] = useState<InteractionMode | null>(null);
   const [message, setMessage] = useState("");
   const [sending, setSending] = useState(false);
   const [suggestingMessage, setSuggestingMessage] = useState(false);
   const [localResult, setLocalResult] = useState<TalkResult | null>(resolvedLastResult ?? null);
+  const [dropdownOpen, setDropdownOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const isFirstRender = useRef(true);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  // ── Voice agent ──────────────────────────────────────────────────────────
+  const voice = useVoiceAgent({
+    characterName: character.name,
+    personality: character.personality,
+    voiceStyle: character.voiceStyle,
+  });
+
+  // ── Click-outside handler for dropdown ──────────────────────────────────
+  useEffect(() => {
+    if (!dropdownOpen) return;
+    function handleClickOutside(e: MouseEvent) {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setDropdownOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [dropdownOpen]);
 
   useEffect(() => {
     if (!isLoading && lastResult) setLocalResult(lastResult);
   }, [lastResult, isLoading]);
 
+  // Auto-suggestion on mode change
   useEffect(() => {
     if (isFirstRender.current) {
       isFirstRender.current = false;
       return;
     }
+    if (!selectedMode) return;
     let cancelled = false;
     setSuggestingMessage(true);
     fetchSuggestion(selectedMode, character.name, character.personality).then((s) => {
@@ -250,18 +440,41 @@ export function InteractionModal({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedMode]);
 
-  async function handleSend() {
-    const trimmed = message.trim();
+  // ── Core send handler ────────────────────────────────────────────────────
+
+  const handleSend = useCallback(async (overrideText?: string) => {
+    const trimmed = (overrideText ?? message).trim();
     if (!trimmed || sending) return;
     setSending(true);
     try {
-      const result = await resolvedOnTalk?.(selectedMode, trimmed) ?? null;
-      if (result) setLocalResult(result);
-      setMessage("");
+      const result = await resolvedOnTalk?.(selectedMode ?? "befriend", trimmed) ?? null;
+      if (result) {
+        setLocalResult(result);
+        // Auto-speak character response when voice mode is active
+        if (voice.isEnabled && result.response) {
+          await voice.speakAsCharacter(result.response);
+        }
+      }
+      if (!overrideText) setMessage("");
     } finally {
       setSending(false);
     }
-  }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [message, sending, selectedMode, voice.isEnabled, voice.speakAsCharacter, resolvedOnTalk]);
+
+  // ── Voice STT → auto-send ────────────────────────────────────────────────
+
+  const handleVoiceMicPress = useCallback(() => {
+    voice.startListening(async (transcript) => {
+      setMessage(transcript);
+      // Small delay so state update propagates, then send
+      setTimeout(() => handleSend(transcript), 50);
+    });
+  }, [voice, handleSend]);
+
+  const handleVoiceMicRelease = useCallback(() => {
+    voice.stopListening();
+  }, [voice]);
 
   function handleKeyDown(e: React.KeyboardEvent) {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -272,7 +485,7 @@ export function InteractionModal({
 
   const displayScore = localResult?.newRelationshipToUser ?? character.relationshipToUser;
   const displayEmotion = localResult?.emotionalStateUpdate ?? character.emotionalState;
-  const modeConfig = INTERACTION_MODES.find((m) => m.mode === selectedMode)!;
+  const modeConfig = selectedMode ? INTERACTION_MODES.find((m) => m.mode === selectedMode)! : null;
 
   return (
     <motion.div
@@ -303,7 +516,7 @@ export function InteractionModal({
 
         {/* Window chrome header */}
         <div
-          className="shrink-0 max-h-[42vh] overflow-y-auto"
+          className="shrink-0 max-h-[46vh] overflow-y-auto"
           style={{
             border: "2px solid #FFDE00",
             boxShadow: "3px 3px 0 rgba(204,0,0,0.6)",
@@ -322,14 +535,77 @@ export function InteractionModal({
                 ▸ TALKING TO: {character.name.toUpperCase()}
               </span>
             </div>
-            <button
-              onClick={onClose}
-              className="font-pixel text-xs px-1.5 py-0 touch-target"
-              style={{ border: "1px solid rgba(255,222,0,0.4)", color: "#FFDE00", background: "rgba(0,0,0,0.3)" }}
-              aria-label="Close"
-            >
-              ✕
-            </button>
+
+            <div className="flex items-center gap-1.5">
+              {/* Save character */}
+              {onSave && (
+                <motion.button
+                  onClick={() => onSave(character)}
+                  className="font-pixel text-[10px] px-1.5 py-0 touch-target"
+                  style={{
+                    border: "1px solid rgba(255,222,0,0.35)",
+                    color: "rgba(255,222,0,0.5)",
+                    background: "rgba(0,0,0,0.3)",
+                  }}
+                  whileTap={{ scale: 0.9 }}
+                  aria-label="Save character"
+                  title="Save to collection"
+                >
+                  ★
+                </motion.button>
+              )}
+
+              {/* Voice mode toggle */}
+              {voice.isSpeechSupported && (
+                <motion.button
+                  onClick={voice.toggleEnabled}
+                  className="font-pixel text-[10px] px-1.5 py-0 touch-target flex items-center gap-1"
+                  style={{
+                    border: `1px solid ${voice.isEnabled ? "#FFDE00" : "rgba(255,222,0,0.35)"}`,
+                    color: voice.isEnabled ? "#FFDE00" : "rgba(255,222,0,0.5)",
+                    background: voice.isEnabled ? "rgba(255,222,0,0.15)" : "rgba(0,0,0,0.3)",
+                    transition: "all 0.15s",
+                  }}
+                  whileTap={{ scale: 0.9 }}
+                  aria-label={voice.isEnabled ? "Disable voice mode" : "Enable voice mode"}
+                  title={voice.isEnabled ? "Voice mode ON — click to disable" : "Enable voice mode"}
+                >
+                  <AnimatePresence mode="wait">
+                    {voice.isEnabled ? (
+                      <motion.span
+                        key="on"
+                        initial={{ scale: 0.6, opacity: 0 }}
+                        animate={{ scale: 1, opacity: 1 }}
+                        exit={{ scale: 0.6, opacity: 0 }}
+                        style={{ fontSize: 12, lineHeight: 1 }}
+                      >
+                        🎙
+                      </motion.span>
+                    ) : (
+                      <motion.span
+                        key="off"
+                        initial={{ scale: 0.6, opacity: 0 }}
+                        animate={{ scale: 1, opacity: 1 }}
+                        exit={{ scale: 0.6, opacity: 0 }}
+                        style={{ fontSize: 12, lineHeight: 1 }}
+                      >
+                        🔇
+                      </motion.span>
+                    )}
+                  </AnimatePresence>
+                  <span>{voice.isEnabled ? "VOICE ON" : "VOICE"}</span>
+                </motion.button>
+              )}
+
+              <button
+                onClick={onClose}
+                className="font-pixel text-xs px-1.5 py-0 touch-target"
+                style={{ border: "1px solid rgba(255,222,0,0.4)", color: "#FFDE00", background: "rgba(0,0,0,0.3)" }}
+                aria-label="Close"
+              >
+                ✕
+              </button>
+            </div>
           </div>
 
           {/* Panel body */}
@@ -347,6 +623,21 @@ export function InteractionModal({
                 <p className="font-vt text-base mt-0" style={{ color: "rgba(255,255,255,0.45)" }}>
                   {character.personality} · <span className="italic">{displayEmotion}</span>
                 </p>
+                {/* Voice state indicator inline */}
+                {voice.isEnabled && voice.voiceState !== "idle" && (
+                  <div className="flex items-center gap-1 mt-0.5">
+                    <VoiceWaveform
+                      active
+                      color={voice.voiceState === "listening" ? "#FF4444" : "#FFDE00"}
+                      bars={5}
+                    />
+                    <span className="font-pixel text-[9px]" style={{ color: voice.voiceState === "listening" ? "#FF4444" : "#FFDE00" }}>
+                      {voice.voiceState === "listening" && "LISTENING"}
+                      {voice.voiceState === "processing" && "PROCESSING"}
+                      {voice.voiceState === "speaking" && "SPEAKING"}
+                    </span>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -393,9 +684,23 @@ export function InteractionModal({
                   </motion.div>
                 ) : localResult ? (
                   <motion.div key={localResult.response} initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-                    <p className="font-vt text-sm italic leading-snug" style={{ color: "#FFF0B0" }}>
-                      <TypewriterText text={`"${localResult.response}"`} />
-                    </p>
+                    <div className="flex items-start gap-2">
+                      <p className="font-vt text-sm italic leading-snug flex-1" style={{ color: "#FFF0B0" }}>
+                        <TypewriterText text={`"${localResult.response}"`} />
+                      </p>
+                      {/* Speaker icon when voice is playing this response */}
+                      {voice.isEnabled && voice.voiceState === "speaking" && (
+                        <motion.span
+                          className="shrink-0 text-base"
+                          animate={{ opacity: [0.5, 1, 0.5] }}
+                          transition={{ duration: 1, repeat: Infinity }}
+                          style={{ lineHeight: 1 }}
+                          title="Playing voice"
+                        >
+                          🔊
+                        </motion.span>
+                      )}
+                    </div>
                   </motion.div>
                 ) : (
                   <motion.p
@@ -411,71 +716,232 @@ export function InteractionModal({
               </AnimatePresence>
             </div>
 
-            {/* Mode picker */}
-            <div className="grid grid-cols-3 gap-1">
-              {INTERACTION_MODES.map((m) => (
-                <button
-                  key={m.mode}
-                  onClick={() => setSelectedMode(m.mode)}
-                  className="touch-target flex flex-col items-center gap-0 transition-all duration-100"
+            {/* Mode picker — dropdown */}
+            <div ref={dropdownRef} style={{ position: "relative" }}>
+              {/* Trigger */}
+              <button
+                onClick={() => setDropdownOpen((v) => !v)}
+                className="w-full flex items-center justify-between gap-2"
+                style={{
+                  padding: "5px 8px",
+                  border: `2px solid ${modeConfig ? modeConfig.color : "rgba(255,222,0,0.35)"}`,
+                  background: modeConfig ? `rgba(${hexToRgb(modeConfig.color)}, 0.12)` : "rgba(255,222,0,0.05)",
+                  boxShadow: modeConfig ? `2px 2px 0 ${modeConfig.borderColor}60` : "none",
+                  transition: "border-color 0.15s, background 0.15s",
+                }}
+              >
+                <span className="flex items-center gap-1.5">
+                  {modeConfig ? (
+                    <>
+                      <span className="text-base leading-none">{modeConfig.emoji}</span>
+                      <span className="font-pixel text-[11px]" style={{ color: modeConfig.color }}>
+                        {modeConfig.label}
+                      </span>
+                    </>
+                  ) : (
+                    <span className="font-pixel text-[11px]" style={{ color: "rgba(255,222,0,0.45)" }}>
+                      ▸ Choose approach...
+                    </span>
+                  )}
+                </span>
+                <span
+                  className="font-pixel text-[10px] transition-transform duration-150"
                   style={{
-                    padding: "3px 2px",
-                    border: `2px solid ${selectedMode === m.mode ? m.color : m.borderColor + "60"}`,
-                    background: selectedMode === m.mode ? `rgba(${hexToRgb(m.color)}, 0.15)` : "transparent",
-                    boxShadow: selectedMode === m.mode ? `2px 2px 0 ${m.borderColor}60` : "none",
-                    transform: selectedMode === m.mode ? "translate(-1px,-1px)" : "none",
+                    color: "rgba(255,222,0,0.5)",
+                    display: "inline-block",
+                    transform: dropdownOpen ? "scaleY(-1)" : "scaleY(1)",
                   }}
                 >
-                  <span className="text-base leading-none">{m.emoji}</span>
-                  <span className="font-pixel text-[10px]" style={{ color: selectedMode === m.mode ? m.color : "rgba(255,255,255,0.35)" }}>
-                    {m.label}
-                  </span>
-                </button>
-              ))}
+                  ▼
+                </span>
+              </button>
+
+              {/* Options list */}
+              <AnimatePresence>
+                {dropdownOpen && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -4 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -4 }}
+                    transition={{ duration: 0.1 }}
+                    style={{
+                      position: "absolute",
+                      top: "calc(100% + 3px)",
+                      left: 0,
+                      right: 0,
+                      zIndex: 50,
+                      border: "2px solid #FFDE00",
+                      background: "rgba(14,4,4,0.98)",
+                      boxShadow: "3px 3px 0 rgba(204,0,0,0.6)",
+                    }}
+                  >
+                    {/* None option */}
+                    <button
+                      onClick={() => {
+                        setSelectedMode(null);
+                        setMessage("");
+                        setDropdownOpen(false);
+                      }}
+                      className="w-full flex items-center gap-2 transition-all duration-75"
+                      style={{
+                        padding: "6px 10px",
+                        background: selectedMode === null ? "rgba(255,222,0,0.08)" : "transparent",
+                        borderBottom: "1px solid rgba(255,222,0,0.08)",
+                      }}
+                    >
+                      <span
+                        className="font-pixel text-[10px] w-2 shrink-0"
+                        style={{ color: selectedMode === null ? "#FFDE00" : "transparent" }}
+                      >
+                        ▶
+                      </span>
+                      <span className="text-sm leading-none">—</span>
+                      <span
+                        className="font-pixel text-[11px]"
+                        style={{ color: selectedMode === null ? "rgba(255,222,0,0.7)" : "rgba(255,255,255,0.3)" }}
+                      >
+                        NONE
+                      </span>
+                    </button>
+                    {INTERACTION_MODES.map((m) => {
+                      const active = selectedMode === m.mode;
+                      return (
+                        <button
+                          key={m.mode}
+                          onClick={() => {
+                            setSelectedMode(m.mode);
+                            setDropdownOpen(false);
+                          }}
+                          className="w-full flex items-center gap-2 transition-all duration-75"
+                          style={{
+                            padding: "6px 10px",
+                            background: active ? `rgba(${hexToRgb(m.color)}, 0.18)` : "transparent",
+                            borderBottom: "1px solid rgba(255,222,0,0.08)",
+                          }}
+                        >
+                          <span
+                            className="font-pixel text-[10px] w-2 shrink-0"
+                            style={{ color: active ? "#FFDE00" : "transparent" }}
+                          >
+                            ▶
+                          </span>
+                          <span className="text-sm leading-none">{m.emoji}</span>
+                          <span
+                            className="font-pixel text-[11px]"
+                            style={{ color: active ? m.color : "rgba(255,255,255,0.45)" }}
+                          >
+                            {m.label}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
 
-            {/* Mode hint */}
-            <p className="text-center font-pixel text-[10px]" style={{ color: "rgba(255,255,255,0.2)" }}>
-              {modeConfig.emoji} APPROACH: {modeConfig.label}
-            </p>
-
-            {/* Input row */}
-            <div className="flex gap-1.5 items-stretch">
-              <input
-                ref={inputRef}
-                type="text"
-                value={message}
-                onChange={(e) => setMessage(e.target.value)}
-                onKeyDown={handleKeyDown}
-                placeholder={suggestingMessage ? "Generating suggestion..." : `Say to ${character.name}...`}
-                disabled={sending || suggestingMessage}
-                className="flex-1 font-vt text-sm px-2 py-1.5 outline-none disabled:opacity-50"
-                style={{
-                  background: "rgba(6,4,14,0.9)",
-                  border: `2px solid ${suggestingMessage ? "rgba(255,222,0,0.4)" : "rgba(204,0,0,0.5)"}`,
-                  color: "#FFF0B0",
-                  transition: "border-color 0.2s",
-                }}
-                maxLength={200}
-                autoComplete="off"
-              />
-              <motion.button
-                onClick={handleSend}
-                disabled={!message.trim() || sending || suggestingMessage}
-                className="font-pixel text-xs px-2 disabled:opacity-30"
-                style={{
-                  background: message.trim() && !sending ? "#CC0000" : "rgba(204,0,0,0.2)",
-                  border: "2px solid #FFDE00",
-                  color: "#FFDE00",
-                  boxShadow: message.trim() && !sending ? "2px 2px 0 rgba(255,222,0,0.3)" : "none",
-                  minWidth: 36,
-                }}
-                whileTap={{ scale: 0.92 }}
-                aria-label="Send"
-              >
-                ▶
-              </motion.button>
-            </div>
+            {/* Input area — text or voice bar */}
+            <AnimatePresence mode="wait">
+              {voice.isEnabled ? (
+                <motion.div
+                  key="voice-bar"
+                  initial={{ opacity: 0, y: 6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: 6 }}
+                  transition={{ duration: 0.15 }}
+                >
+                  <VoiceBar
+                    voiceState={sending ? "processing" : voice.voiceState}
+                    lastTranscript={voice.lastTranscript}
+                    characterName={character.name}
+                    onMicPress={handleVoiceMicPress}
+                    onMicRelease={handleVoiceMicRelease}
+                    onCancel={voice.cancelSpeaking}
+                    isSpeechSupported={voice.isSpeechSupported}
+                  />
+                  {/* Still allow manual text send in voice mode as fallback */}
+                  <div className="flex gap-1.5 items-stretch mt-1.5">
+                    <input
+                      ref={inputRef}
+                      type="text"
+                      value={message}
+                      onChange={(e) => setMessage(e.target.value)}
+                      onKeyDown={handleKeyDown}
+                      placeholder="Or type manually..."
+                      disabled={sending || voice.voiceState !== "idle"}
+                      className="flex-1 font-vt text-sm px-2 py-1 outline-none disabled:opacity-40"
+                      style={{
+                        background: "rgba(6,4,14,0.7)",
+                        border: "1px solid rgba(204,0,0,0.3)",
+                        color: "#FFF0B0",
+                        fontSize: 11,
+                      }}
+                      maxLength={200}
+                      autoComplete="off"
+                    />
+                    <motion.button
+                      onClick={() => handleSend()}
+                      disabled={!message.trim() || sending || voice.voiceState !== "idle"}
+                      className="font-pixel text-xs px-2 disabled:opacity-30"
+                      style={{
+                        background: message.trim() && !sending ? "#CC0000" : "rgba(204,0,0,0.2)",
+                        border: "1px solid rgba(255,222,0,0.4)",
+                        color: "#FFDE00",
+                        fontSize: 11,
+                      }}
+                      whileTap={{ scale: 0.92 }}
+                      aria-label="Send"
+                    >
+                      ▶
+                    </motion.button>
+                  </div>
+                </motion.div>
+              ) : (
+                <motion.div
+                  key="text-bar"
+                  initial={{ opacity: 0, y: 6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: 6 }}
+                  transition={{ duration: 0.15 }}
+                  className="flex gap-1.5 items-stretch"
+                >
+                  <input
+                    ref={inputRef}
+                    type="text"
+                    value={message}
+                    onChange={(e) => setMessage(e.target.value)}
+                    onKeyDown={handleKeyDown}
+                    placeholder={suggestingMessage ? "Generating suggestion..." : `Say to ${character.name}...`}
+                    disabled={sending || suggestingMessage}
+                    className="flex-1 font-vt text-sm px-2 py-1.5 outline-none disabled:opacity-50"
+                    style={{
+                      background: "rgba(6,4,14,0.9)",
+                      border: `2px solid ${suggestingMessage ? "rgba(255,222,0,0.4)" : "rgba(204,0,0,0.5)"}`,
+                      color: "#FFF0B0",
+                      transition: "border-color 0.2s",
+                    }}
+                    maxLength={200}
+                    autoComplete="off"
+                  />
+                  <motion.button
+                    onClick={() => handleSend()}
+                    disabled={!message.trim() || sending || suggestingMessage}
+                    className="font-pixel text-xs px-2 disabled:opacity-30"
+                    style={{
+                      background: message.trim() && !sending ? "#CC0000" : "rgba(204,0,0,0.2)",
+                      border: "2px solid #FFDE00",
+                      color: "#FFDE00",
+                      boxShadow: message.trim() && !sending ? "2px 2px 0 rgba(255,222,0,0.3)" : "none",
+                      minWidth: 36,
+                    }}
+                    whileTap={{ scale: 0.92 }}
+                    aria-label="Send"
+                  >
+                    ▶
+                  </motion.button>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
         </div>
       </motion.div>

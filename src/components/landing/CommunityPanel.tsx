@@ -1,28 +1,31 @@
 "use client";
 
 import { motion } from "framer-motion";
+import { TrophyIcon, ShareIcon, SignalIcon, GlobeIcon, LockIcon } from "./PixelIcons";
 
-const LOCKED_FEATURES = [
+type IconComponent = React.ComponentType<{ size?: number; color?: string }>;
+
+const LOCKED_FEATURES: { Icon: IconComponent; label: string; desc: string; color: string }[] = [
   {
-    icon: "🏆",
+    Icon: TrophyIcon,
     label: "LEADERBOARD",
     desc: "Global rankings by XP, sessions completed, and longest streak.",
     color: "#FFDE00",
   },
   {
-    icon: "🎨",
+    Icon: ShareIcon,
     label: "SHARE RECAP",
     desc: "Post your generated episode poster to the community feed.",
     color: "#C84B7A",
   },
   {
-    icon: "📡",
+    Icon: SignalIcon,
     label: "GUILD CHAT",
     desc: "Real-time channel for main characters worldwide.",
     color: "#B0C4FF",
   },
   {
-    icon: "🌍",
+    Icon: GlobeIcon,
     label: "WORLD MAP",
     desc: "See active sessions and hotspots across the globe.",
     color: "#3B4CCA",
@@ -128,15 +131,18 @@ export default function CommunityPanel() {
             <div
               style={{
                 position: "absolute",
-                top: 6,
-                right: 8,
-                fontSize: 16,
+                top: 8,
+                right: 10,
+                display: "flex",
+                alignItems: "center",
               }}
             >
-              🔒
+              <LockIcon size={12} color="rgba(255,255,255,0.3)" />
             </div>
 
-            <div style={{ fontSize: 20, flexShrink: 0 }}>{feat.icon}</div>
+            <div style={{ flexShrink: 0, display: "flex", alignItems: "center", width: 20, justifyContent: "center" }}>
+              <feat.Icon size={16} color={feat.color} />
+            </div>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div
                 className="font-pixel"

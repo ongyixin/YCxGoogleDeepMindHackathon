@@ -2,16 +2,18 @@
 
 import { cn } from "@/lib/cn";
 import { clamp, formatDuration } from "@/lib/utils";
-import type { Mission, MomentumState, NarrationEvent } from "@/types";
+import type { Mission, MomentumState, NarrationEvent, ObjectiveSnapshot } from "@/types";
 
 interface ActiveMissionProps {
   mission: Mission;
   momentum?: MomentumState;
   latestNarration?: NarrationEvent;
+  snapshots?: ObjectiveSnapshot[];
   onComplete?: (missionId: string) => void;
   onAbandon?: (missionId: string) => void;
   onMissionComplete?: (missionId: string) => void;
   onObjectiveComplete?: (missionId: string, objectiveId: string) => void;
+  onOpenGallery?: () => void;
   className?: string;
 }
 
@@ -34,10 +36,12 @@ export function ActiveMission({
   mission,
   momentum = DEFAULT_MOMENTUM,
   latestNarration,
+  snapshots = [],
   onComplete,
   onAbandon,
   onMissionComplete,
   onObjectiveComplete,
+  onOpenGallery,
   className,
 }: ActiveMissionProps) {
   const handleComplete = () => { onMissionComplete?.(mission.id); onComplete?.(mission.id); };
@@ -100,29 +104,46 @@ export function ActiveMission({
             className="flex flex-col gap-1.5 py-2 px-3"
             style={{ border: "1px solid rgba(59,76,202,0.4)", background: "rgba(6,8,30,0.6)" }}
           >
-            {mission.objectives.map((obj) => (
-              <button
-                key={obj.id}
-                className="flex items-start gap-2 w-full text-left"
-                onClick={() => !obj.completed && onObjectiveComplete?.(mission.id, obj.id)}
-              >
-                <span
-                  className="font-pixel text-base mt-0.5 shrink-0"
-                  style={{ color: obj.completed ? "#FFDE00" : "rgba(255,222,0,0.3)" }}
+            {mission.objectives.map((obj) => {
+              const hasSnapshot = snapshots.some((s) => s.objectiveId === obj.id);
+              return (
+                <button
+                  key={obj.id}
+                  className="flex items-start gap-2 w-full text-left group active:scale-[0.98] transition-transform"
+                  onClick={() => !obj.completed && onObjectiveComplete?.(mission.id, obj.id)}
+                  disabled={obj.completed}
+                  style={{ cursor: obj.completed ? "default" : "pointer" }}
                 >
-                  {obj.completed ? "■" : "□"}
-                </span>
-                <span
-                  className="font-vt text-xl"
-                  style={{
-                    color: obj.completed ? "rgba(255,255,255,0.25)" : "rgba(176,196,255,0.7)",
-                    textDecoration: obj.completed ? "line-through" : "none",
-                  }}
-                >
-                  {obj.description}
-                </span>
-              </button>
-            ))}
+                  <span
+                    className="font-pixel text-base mt-0.5 shrink-0 transition-all duration-150"
+                    style={{
+                      color: obj.completed ? "#FFDE00" : "rgba(255,222,0,0.3)",
+                      textShadow: obj.completed ? "0 0 8px rgba(255,222,0,0.6)" : "none",
+                    }}
+                  >
+                    {obj.completed ? "■" : "□"}
+                  </span>
+                  <span
+                    className="font-vt text-xl flex-1"
+                    style={{
+                      color: obj.completed ? "rgba(255,255,255,0.25)" : "rgba(176,196,255,0.7)",
+                      textDecoration: obj.completed ? "line-through" : "none",
+                    }}
+                  >
+                    {obj.description}
+                  </span>
+                  {hasSnapshot && (
+                    <span
+                      className="font-pixel shrink-0 mt-0.5"
+                      style={{ color: "rgba(59,76,202,0.7)", fontSize: "9px", letterSpacing: "0.05em" }}
+                      title="Intel captured"
+                    >
+                      ▣
+                    </span>
+                  )}
+                </button>
+              );
+            })}
           </div>
         )}
 
@@ -194,6 +215,36 @@ export function ActiveMission({
           >
             ■ MARK DONE
           </button>
+          {snapshots.length > 0 && (
+            <button
+              onClick={onOpenGallery}
+              className="touch-target font-pixel px-3 active:translate-x-[1px] active:translate-y-[1px] relative"
+              style={{
+                background: "rgba(59,76,202,0.12)",
+                border: "2px solid rgba(59,76,202,0.6)",
+                boxShadow: "2px 2px 0 rgba(59,76,202,0.3)",
+                color: "rgba(176,196,255,0.85)",
+                fontSize: "11px",
+                letterSpacing: "0.08em",
+                transition: "box-shadow 0.05s, transform 0.05s",
+              }}
+            >
+              ▣ LOG
+              <span
+                className="absolute -top-1.5 -right-1.5 font-pixel flex items-center justify-center"
+                style={{
+                  background: "#FFDE00",
+                  color: "#0a0e30",
+                  fontSize: "8px",
+                  width: "14px",
+                  height: "14px",
+                  lineHeight: 1,
+                }}
+              >
+                {snapshots.length}
+              </span>
+            </button>
+          )}
           <button
             onClick={handleAbandon}
             className="touch-target font-pixel px-4 active:translate-x-[1px] active:translate-y-[1px]"

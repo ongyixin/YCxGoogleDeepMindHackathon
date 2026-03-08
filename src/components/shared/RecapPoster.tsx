@@ -1,5 +1,6 @@
 "use client";
 
+import { forwardRef } from "react";
 import { cn } from "@/lib/cn";
 import type { ActiveMode, StoryGenre } from "@/types";
 
@@ -13,7 +14,7 @@ interface RecapPosterProps {
   className?: string;
 }
 
-export function RecapPoster({
+export const RecapPoster = forwardRef<HTMLDivElement, RecapPosterProps>(function RecapPoster({
   mode,
   genre,
   durationMinutes,
@@ -21,7 +22,7 @@ export function RecapPoster({
   highlights,
   posterUrl,
   className,
-}: RecapPosterProps) {
+}: RecapPosterProps, ref: React.Ref<HTMLDivElement>) {
   const isStory = mode === "story";
   const borderColor = isStory ? "#FFDE00" : "#FFDE00";
   const innerBorderColor = isStory ? "#CC0000" : "#3B4CCA";
@@ -34,6 +35,7 @@ export function RecapPoster({
 
   return (
     <div
+      ref={ref}
       className={cn("relative w-full", className)}
       style={{ aspectRatio: "9/16", maxHeight: "70vh" }}
     >
@@ -146,7 +148,7 @@ export function RecapPoster({
       </div>
     </div>
   );
-}
+});
 
 function StatBlock({
   label,

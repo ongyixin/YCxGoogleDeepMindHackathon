@@ -10,6 +10,7 @@ import NarrationBanner from "@/components/shared/NarrationBanner";
 import { Camera, type CameraHandle } from "@/components/shared/Camera";
 import { MOCK_STORY_SESSION } from "@/lib/mock-data";
 import { DEMO_MODE } from "@/lib/constants";
+import { saveCharacter } from "@/lib/shared/characterCollection";
 import type {
   ObjectCharacter,
   InteractionMode,
@@ -190,9 +191,17 @@ function StoryContent() {
     }
   }, [sessionId, scanLoading, fetchMusic]);
 
+  // ── Save character to collection ────────────────────────────────────────────
+  const handleSaveCharacter = useCallback(
+    (character: import("@/types").ObjectCharacter) => {
+      saveCharacter(character, genre);
+    },
+    [genre]
+  );
+
   // ── Talk handler ────────────────────────────────────────────────────────────
   const handleTalk = useCallback(
-    async (mode: InteractionMode, message: string): Promise<string | null> => {
+    async (mode: InteractionMode, message: string): Promise<{ response: string; relationshipDelta: number; newRelationshipToUser: number; emotionalStateUpdate?: string } | null> => {
       if (DEMO_MODE) {
         console.log("[Story] talk:", selectedCharacter?.id, mode, message);
         return null;
@@ -211,15 +220,32 @@ function StoryContent() {
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data: TalkResponse = await res.json();
-        if (data.narration) {
-          setSession((prev) =>
-            prev
-              ? { ...prev, narrativeLog: [...prev.narrativeLog, data.narration!] }
-              : prev
-          );
-        }
+        const newRelationshipToUser = Math.min(100, Math.max(-100,
+          selectedCharacter.relationshipToUser + (data.relationshipDelta ?? 0)
+        ));
+        // Update narration and character relationship score in local session state
+        setSession((prev) => {
+          if (!prev?.storyState) return prev;
+          return {
+            ...prev,
+            narrativeLog: data.narration ? [...prev.narrativeLog, data.narration] : prev.narrativeLog,
+            storyState: {
+              ...prev.storyState,
+              characters: prev.storyState.characters.map((c) =>
+                c.id === selectedCharacter.id
+                  ? { ...c, relationshipToUser: newRelationshipToUser, emotionalState: data.emotionalStateUpdate ?? c.emotionalState }
+                  : c
+              ),
+            },
+          };
+        });
         await fetchMusic();
-        return data.response ?? null;
+        return {
+          response: data.response,
+          relationshipDelta: data.relationshipDelta ?? 0,
+          newRelationshipToUser,
+          emotionalStateUpdate: data.emotionalStateUpdate,
+        };
       } catch (err) {
         console.error("[Story] Talk failed:", err);
         return null;
@@ -302,16 +328,14 @@ function StoryContent() {
       })}
 
       {/* Layer 3: StoryHUD */}
-      <div className="absolute inset-0 z-[20]">
-        <StoryHUD
-          storyState={storyState}
-          sessionStartedAt={session.startedAt}
-          onScan={handleScan}
-          onSelectCharacter={setSelectedCharacter}
-          scanLoading={scanLoading}
-          selectedCharacterId={selectedCharacter?.id}
-        />
-      </div>
+      <StoryHUD
+        storyState={storyState}
+        sessionStartedAt={session.startedAt}
+        onScan={handleScan}
+        onSelectCharacter={setSelectedCharacter}
+        scanLoading={scanLoading}
+        selectedCharacterId={selectedCharacter?.id}
+      />
 
       {/* Music status / player */}
       <div className="absolute top-0 left-1/2 -translate-x-1/2 z-[21] safe-top px-3 py-3">
@@ -359,6 +383,7 @@ function StoryContent() {
           character={selectedCharacter}
           onClose={() => setSelectedCharacter(null)}
           onTalk={handleTalk}
+          onSave={handleSaveCharacter}
         />
       )}
 
